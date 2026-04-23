@@ -4,6 +4,66 @@ import numpy as np
 
 # 1. Page Setup
 st.set_page_config(page_title="4G Capital UPIA Incentive System", page_icon="🏢", layout="wide")
+
+# --- HIDE STREAMLIT BRANDING ---
+hide_menu_style = """
+        <style>
+        #MainMenu {visibility: hidden;}
+        header {visibility: hidden;}
+        footer {visibility: hidden;}
+        </style>
+        """
+st.markdown(hide_menu_style, unsafe_allow_html=True)
+
+# --- 🔒 LOGIN GATE SYSTEM ---
+def check_password():
+    """Returns `True` if the user had a correct password."""
+
+    def password_entered():
+        """Checks whether a password entered by the user is correct."""
+        if (
+            st.session_state["username"] in st.secrets["passwords"]
+            and st.session_state["password"] == st.secrets["passwords"][st.session_state["username"]]
+        ):
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # Don't store password in memory
+        else:
+            st.session_state["password_correct"] = False
+
+    if "password_correct" not in st.session_state:
+        # First run, show inputs for username + password.
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.title("🔒 System Login")
+            st.write("Please log in to access the Incentive Payout System.")
+            st.text_input("Username", key="username")
+            st.text_input("Password", type="password", key="password")
+            st.button("Login", on_click=password_entered)
+        return False
+        
+    elif not st.session_state["password_correct"]:
+        # Password incorrect, show input + error.
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.title("🔒 System Login")
+            st.text_input("Username", key="username")
+            st.text_input("Password", type="password", key="password")
+            st.button("Login", on_click=password_entered)
+            st.error("😕 Username or password incorrect.")
+        return False
+        
+    else:
+        # Password correct.
+        return True
+
+# If the user is NOT logged in, stop the app right here.
+if not check_password():
+    st.stop()
+
+# ==========================================
+# IF LOGGED IN, THE REST OF THE APP RUNS:
+# ==========================================
+
 st.title("4G Capital UPIA Incentive System 🏢")
 st.write("Generate accurate payroll for Pairs, Branch Managers, ASMs, and Sector Managers.")
 
