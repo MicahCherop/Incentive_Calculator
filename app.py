@@ -12,11 +12,9 @@ hide_menu_style = """
         <style>
         #MainMenu {visibility: hidden;}
         footer {visibility: hidden;}
-        /* This targets the top-right deployment decoration but leaves the sidebar toggle alone */
         .stAppDeployButton {display:none;}
         [data-testid="stHeader"] {background: rgba(0,0,0,0); height: 0rem;} 
         
-        /* Prevent UI elements from printing */
         @media print {
             #MainMenu, .stSidebar, header { display: none !important; }
         }
@@ -82,14 +80,11 @@ if st.session_state.current_page == "calculator":
         ["Pairs (LO & CO)", "Branch Managers", "Assistant Sector Managers", "Sector Managers"]
     )
 
-    st.sidebar.write("### 2. Select Active Campaigns")
-    active_campaigns = []
-    if st.sidebar.checkbox("New Customers"): active_campaigns.append("New Customers")
-    if st.sidebar.checkbox("Unique Customers"): active_campaigns.append("Unique Customers")
-    if st.sidebar.checkbox("Active Customers"): active_campaigns.append("Active Customers")
-    if st.sidebar.checkbox("Dormant Customers"): active_campaigns.append("Dormant Customers")
-    if st.sidebar.checkbox("Collections"): active_campaigns.append("Collections")
-    if st.sidebar.checkbox("Disbursements"): active_campaigns.append("Disbursements")
+    # Reverted back to a single selectbox
+    campaign_name = st.sidebar.selectbox(
+        "2. Select Campaign", 
+        ["New Customers", "Unique Customers", "Active Customers", "Dormant Customers", "Collections", "Disbursements"]
+    )
 
     st.sidebar.divider() 
 
@@ -105,39 +100,35 @@ if st.session_state.current_page == "calculator":
             scale_threshold = st.sidebar.number_input("Standard Sector Branch Count", value=25)
         st.sidebar.divider()
 
-    # --- PAYOUT SETTINGS ---
     st.sidebar.write("### 💵 Payout Settings")
     base_bonus = st.sidebar.number_input("Base Bonus", value=3000.0, step=500.0)
     
     incremental_bonus = 0.0
     disbursement_bonus_step = 0.0
-    cust_campaigns = ["New Customers", "Unique Customers", "Active Customers", "Dormant Customers"]
-    
-    if any(c in active_campaigns for c in cust_campaigns):
+    if campaign_name in ["New Customers", "Unique Customers", "Active Customers", "Dormant Customers"]:
         incremental_bonus = st.sidebar.number_input("Extra Bonus (Per 2 Extra Customers)", value=200.0, step=100.0)
-    if "Disbursements" in active_campaigns:
+    elif campaign_name == "Disbursements":
         disbursement_bonus_step = st.sidebar.number_input("Extra Bonus (Per 1% Extra)", value=200.0, step=50.0)
 
-    # --- TARGET CUSTOMIZATION ---
     st.sidebar.divider()
     st.sidebar.write("### 🎯 Target Customization")
     
     new_cust_t = unique_cust_t = active_cust_t = dormant_cust_t = 0.0
     coll_amt_t = dd7_t = otc_t = disb_pct_t = 0.0
 
-    if "New Customers" in active_campaigns:
+    if campaign_name == "New Customers":
         new_cust_t = st.sidebar.number_input("Base Min New Customers", value=6.0)
-    if "Unique Customers" in active_campaigns:
+    elif campaign_name == "Unique Customers":
         unique_cust_t = st.sidebar.number_input("Base Min Unique Customers", value=6.0)
-    if "Active Customers" in active_campaigns:
+    elif campaign_name == "Active Customers":
         active_cust_t = st.sidebar.number_input("Base Min Active Customers", value=10.0)
-    if "Dormant Customers" in active_campaigns:
+    elif campaign_name == "Dormant Customers":
         dormant_cust_t = st.sidebar.number_input("Base Min Dormant Customers", value=2.0)
-    if "Collections" in active_campaigns:
+    elif campaign_name == "Collections":
         coll_amt_t = st.sidebar.number_input("Base Min Collection Amount", value=50000.0)
         dd7_t = st.sidebar.number_input("Min DD+7 (%)", value=80.0)
         otc_t = st.sidebar.number_input("Min OTC (%)", value=75.0)
-    if "Disbursements" in active_campaigns:
+    elif campaign_name == "Disbursements":
         disb_pct_t = st.sidebar.number_input("Min Disbursement (%)", value=100.0)
 
 # ==========================================
@@ -163,12 +154,7 @@ if st.session_state.current_page == "admin":
 
 else:
     st.title("UPIA Incentive System 🏢")
-    
-    if not active_campaigns:
-        st.info("👈 Please select at least one active campaign from the sidebar to begin.")
-        st.stop()
-        
-    st.write(f"**Level:** {eval_level} | **Active Campaigns:** {', '.join(active_campaigns)}")
+    st.write(f"**Level:** {eval_level} | **Campaign:** {campaign_name}")
 
     c1, c2 = st.columns(2)
     with c1: perf_file = st.file_uploader("1. Upload Performance CSV", type=['csv'])
@@ -215,44 +201,28 @@ else:
                 else:
                     eval_df['Target_Multiplier'] = np.where(eval_df['Unit_Count'] > scale_threshold, eval_df['Unit_Count'] / scale_threshold, 1.0)
 
-            # Filtering logic using dynamic mask (AND condition)
+            # Filtering & Bonus Logic
             q = eval_df.copy()
             mult = q['Target_Multiplier']
-            mask = pd.Series([True] * len(q), index=q.index)
             
-            if "New Customers" in active_campaigns:
-                mask &= (q['New_Customers'] >= (new_cust_t * mult))
-            if "Unique Customers" in active_campaigns:
-                mask &= (q['Unique_Customers'] >= (unique_cust_t * mult))
-            if "Active Customers" in active_campaigns:
-                mask &= (q['Active_Customers'] >= (active_cust_t * mult))
-            if "Dormant Customers" in active_campaigns:
-                mask &= (q['Dormant_Customers'] >= (dormant_cust_t * mult))
-            if "Collections" in active_campaigns:
-                mask &= (q['Amount_Collected'] >= (coll_amt_t * mult)) & (q['DD_Plus_7_Pct'] >= dd7_t) & (q['OTC_Pct'] >= otc_t)
-            if "Disbursements" in active_campaigns:
-                mask &= (q['Disbursements'] >= disb_pct_t)
+            # Applying campaign specific filters
+            if campaign_name == "New Customers": q = q[q['New_Customers'] >= (new_cust_t * mult)]
+            elif campaign_name == "Unique Customers": q = q[q['Unique_Customers'] >= (unique_cust_t * mult)]
+            elif campaign_name == "Active Customers": q = q[q['Active_Customers'] >= (active_cust_t * mult)]
+            elif campaign_name == "Dormant Customers": q = q[q['Dormant_Customers'] >= (dormant_cust_t * mult)]
+            elif campaign_name == "Collections": q = q[(q['Amount_Collected'] >= (coll_amt_t * mult)) & (q['DD_Plus_7_Pct'] >= dd7_t) & (q['OTC_Pct'] >= otc_t)]
+            elif campaign_name == "Disbursements": q = q[q['Disbursements'] >= disb_pct_t]
 
-            q = q[mask]
-
-            # Calculating cumulative extra rewards based on active campaigns
-            q['Staff_Payout_Amount'] = base_bonus
+            # Calculating extra rewards
+            extra_c = 0.0
+            if campaign_name == "New Customers": extra_c = (q['New_Customers'] - (new_cust_t * mult)).clip(lower=0)
+            elif campaign_name == "Unique Customers": extra_c = (q['Unique_Customers'] - (unique_cust_t * mult)).clip(lower=0)
+            elif campaign_name == "Active Customers": extra_c = (q['Active_Customers'] - (active_cust_t * mult)).clip(lower=0)
+            elif campaign_name == "Dormant Customers": extra_c = (q['Dormant_Customers'] - (dormant_cust_t * mult)).clip(lower=0)
             
-            if "New Customers" in active_campaigns:
-                extra = (q['New_Customers'] - (new_cust_t * mult)).clip(lower=0)
-                q['Staff_Payout_Amount'] += np.floor(extra / 2) * incremental_bonus
-            if "Unique Customers" in active_campaigns:
-                extra = (q['Unique_Customers'] - (unique_cust_t * mult)).clip(lower=0)
-                q['Staff_Payout_Amount'] += np.floor(extra / 2) * incremental_bonus
-            if "Active Customers" in active_campaigns:
-                extra = (q['Active_Customers'] - (active_cust_t * mult)).clip(lower=0)
-                q['Staff_Payout_Amount'] += np.floor(extra / 2) * incremental_bonus
-            if "Dormant Customers" in active_campaigns:
-                extra = (q['Dormant_Customers'] - (dormant_cust_t * mult)).clip(lower=0)
-                q['Staff_Payout_Amount'] += np.floor(extra / 2) * incremental_bonus
-            if "Disbursements" in active_campaigns:
-                extra = (q['Disbursements'] - disb_pct_t).clip(lower=0)
-                q['Staff_Payout_Amount'] += np.floor(extra) * disbursement_bonus_step
+            extra_d = (q['Disbursements'] - disb_pct_t).clip(lower=0) if campaign_name == "Disbursements" else 0.0
+
+            q['Staff_Payout_Amount'] = base_bonus + (np.floor(extra_c / 2) * incremental_bonus) + (np.floor(extra_d) * disbursement_bonus_step)
 
             # Role Splitting & Directory Merging
             if eval_level == "Pairs (LO & CO)":
@@ -278,7 +248,14 @@ else:
                 staff_df = staff_df.merge(s_dir.drop_duplicates(m_keys), on=m_keys, how='left')
 
             # Final View Preparation
-            cols = ['Sector', 'Subsector', 'Branch', 'Pair_ID', 'Staff_Name', 'Phone_Number', 'Role', 'DD_Plus_7_Pct', 'OTC_Pct', 'Disbursements', 'Unit_Count', 'Target_Multiplier', 'Staff_Payout_Amount']
+            # Include percentage columns dynamically based on the campaign so they appear in the final table
+            cols = ['Sector', 'Subsector', 'Branch', 'Pair_ID', 'Staff_Name', 'Phone_Number', 'Role']
+            if campaign_name == "Collections":
+                cols.extend(['Amount_Collected', 'DD_Plus_7_Pct', 'OTC_Pct'])
+            elif campaign_name == "Disbursements":
+                cols.append('Disbursements')
+            cols.extend(['Unit_Count', 'Target_Multiplier', 'Staff_Payout_Amount'])
+            
             available = [c for c in cols if c in staff_df.columns]
             staff_df = staff_df[available]
 
@@ -292,9 +269,9 @@ else:
             st.success(f"🎉 Generated {len(staff_df)} payouts!")
             st.dataframe(display_df)
             
-            # Export uses raw numeric values (staff_df) instead of formatted strings (display_df)
+            # Export uses raw numeric values (staff_df)
             csv = staff_df.to_csv(index=False).encode('utf-8')
-            st.download_button("⬇️ Download CSV", data=csv, file_name='hybrid_campaign_payouts.csv', mime='text/csv')
+            st.download_button("⬇️ Download CSV", data=csv, file_name=f'{campaign_name}_payouts.csv', mime='text/csv')
 
         except Exception as e:
             st.error(f"Error processing: {e}")
