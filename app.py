@@ -340,3 +340,23 @@ if perf_file is not None:
 
     except Exception as e:
         st.error(f"An unexpected error occurred: {e}")
+
+# ==========================================
+# 12. ADMIN PANEL (Only visible to 'admin')
+# ==========================================
+if st.session_state.get("username") == "admin":
+    st.sidebar.divider()
+    st.sidebar.write("### 🛠️ Admin Panel")
+    with st.sidebar.expander("Add New Users"):
+        st.write("Streamlit Cloud blocks apps from rewriting passwords directly. Generate the safe code here to paste into your dashboard.")
+        
+        new_user = st.text_input("New Username", key="new_user_input")
+        new_pass = st.text_input("New Password", type="password", key="new_pass_input")
+        
+        if st.button("Generate Secret Code"):
+            if new_user and new_pass:
+                # Generates the safe TOML format
+                st.code(f'{new_user} = "{new_pass}"', language="toml")
+                st.info("Copy the code block above and paste it under the `[passwords]` section in your Streamlit Cloud **Settings -> Secrets** menu.")
+            else:
+                st.error("Please enter both a username and a password.")
