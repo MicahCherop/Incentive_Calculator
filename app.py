@@ -5,12 +5,13 @@ import numpy as np
 # 1. Page Setup
 st.set_page_config(page_title="4G Capital UPIA Incentive System", page_icon="🏢", layout="wide")
 
-# --- HIDE STREAMLIT BRANDING ---
 hide_menu_style = """
         <style>
         #MainMenu {visibility: hidden;}
-        header {visibility: hidden;}
         footer {visibility: hidden;}
+        /* This targets the top-right decoration but leaves the sidebar toggle alone */
+        .stAppDeployButton {display:none;}
+        [data-testid="stHeader"] {background: rgba(0,0,0,0); height: 0rem;} 
         </style>
         """
 st.markdown(hide_menu_style, unsafe_allow_html=True)
