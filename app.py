@@ -49,7 +49,7 @@ incremental_bonus = 0.0
 disbursement_incremental_bonus = 0.0
 
 if campaign_name in ["New Customers", "Unique Customers", "Active Customers", "Dormant Customers"]:
-    incremental_bonus = st.sidebar.number_input("Extra Bonus (Per 2 Extra Customers)", value=500.0, step=100.0)
+    incremental_bonus = st.sidebar.number_input("Extra Bonus (Per 2 Extra Customers)", value=200.0, step=100.0)
 elif campaign_name == "Disbursements":
     disbursement_incremental_bonus = st.sidebar.number_input("Extra Bonus (Per 1% Extra Disbursement)", value=200.0, step=50.0)
 
