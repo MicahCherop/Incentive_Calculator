@@ -26,35 +26,29 @@ def check_password():
             and st.session_state["password"] == st.secrets["passwords"][st.session_state["username"]]
         ):
             st.session_state["password_correct"] = True
+            # CRITICAL FIX: Save the username to a permanent memory slot
+            st.session_state["active_user"] = st.session_state["username"]
             del st.session_state["password"]  # Don't store password in memory
         else:
             st.session_state["password_correct"] = False
 
-    if "password_correct" not in st.session_state:
-        # First run, show inputs for username + password.
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            st.title("🔒 System Login")
-            st.write("Please log in to access the Incentive Payout System.")
-            st.text_input("Username", key="username")
-            st.text_input("Password", type="password", key="password")
-            st.button("Login", on_click=password_entered)
-        return False
-        
-    elif not st.session_state["password_correct"]:
-        # Password incorrect, show input + error.
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            st.title("🔒 System Login")
-            st.text_input("Username", key="username")
-            st.text_input("Password", type="password", key="password")
-            st.button("Login", on_click=password_entered)
-            st.error("😕 Username or password incorrect.")
-        return False
-        
-    else:
-        # Password correct.
+    # Check if they are already logged in
+    if st.session_state.get("password_correct", False):
         return True
+
+    # If not logged in, show the login form
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.title("🔒 System Login")
+        st.write("Please log in to access the Incentive Payout System.")
+        st.text_input("Username", key="username")
+        st.text_input("Password", type="password", key="password")
+        st.button("Login", on_click=password_entered)
+        
+        if "password_correct" in st.session_state and not st.session_state["password_correct"]:
+            st.error("😕 Username or password incorrect.")
+            
+    return False
 
 # If the user is NOT logged in, stop the app right here.
 if not check_password():
@@ -67,8 +61,8 @@ if not check_password():
 if "current_page" not in st.session_state:
     st.session_state.current_page = "calculator"
 
-# Admin Navigation (Only visible to admin)
-if st.session_state.get("username") == "admin":
+# Admin Navigation (Only visible to admin using the permanent memory slot)
+if st.session_state.get("active_user") == "admin":
     st.sidebar.divider()
     st.sidebar.write("### 🛠️ Administration")
     if st.session_state.current_page == "calculator":
@@ -79,7 +73,6 @@ if st.session_state.get("username") == "admin":
         if st.sidebar.button("⬅️ Back to Calculator", use_container_width=True):
             st.session_state.current_page = "calculator"
             st.rerun()
-
 
 # ==========================================
 # PAGE 1: ADMIN DASHBOARD
@@ -111,6 +104,13 @@ if st.session_state.current_page == "admin":
         else:
             st.error("Please fill out both the username and password fields.")
 
+
+# ==========================================
+# PAGE 2: THE MAIN CALCULATOR APP
+# ==========================================
+elif st.session_state.current_page == "calculator":
+    st.title("4G Capital UPIA Incentive System 🏢")
+    st.write("Generate accurate payroll for Pairs, Branch Managers, ASMs, and Sector Managers.")
 
 # ==========================================
 # PAGE 2: THE MAIN CALCULATOR APP
