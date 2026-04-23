@@ -3,8 +3,8 @@ import pandas as pd
 import numpy as np
 
 # 1. Page Setup
-st.set_page_config(page_title="Organizational Incentive System", page_icon="🏢", layout="wide")
-st.title("Organizational Incentive System 🏢")
+st.set_page_config(page_title="4G Capital UPIA Incentive System", page_icon="🏢", layout="wide")
+st.title("4G Capital UPIA Incentive System 🏢")
 st.write("Generate accurate payroll for Pairs, Branch Managers, ASMs, and Sector Managers.")
 
 # 2. Sidebar - Campaign & Level Selection
