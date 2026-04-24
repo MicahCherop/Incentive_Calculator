@@ -2,40 +2,41 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-# 1. Page Setup
+# 1. Page Setup - Force Expanded State
 st.set_page_config(
     page_title="4G Capital UPIA Incentive System", 
     page_icon="🏢", 
     layout="wide",
-    initial_sidebar_state="expanded" # This keeps it open when the page loads
+    initial_sidebar_state="expanded"
 )
 
-# --- ULTIMATE CLEAN UI (KEEPS SIDEBAR TOGGLE VISIBLE) ---
-hide_menu_style = """
-        <style>
-        /* Hide the top right hamburger menu */
-        #MainMenu {visibility: hidden;}
-        
-        /* Hide the "Made with Streamlit" footer */
-        footer {visibility: hidden;}
-        
-        /* Hide the top decoration bar */
-        div[data-testid="stHeader"] {
-            background-color: rgba(0,0,0,0);
-            color: white;
-        }
+# --- 🔒 LOCK SIDEBAR & HIDE BRANDING ---
+# This CSS hides the collapse button and prevents the sidebar from being closed
+lock_sidebar_style = """
+    <style>
+    /* Hide the top right hamburger menu and footer */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
 
-        /* Ensure the sidebar button remains visible and clickable */
-        button[kind="header"] {
-            visibility: visible !format;
-            color: #31333F; /* Standard Streamlit dark gray for visibility */
-        }
-        
-        /* Hide the 'Deploy' button and other header junk */
-        div[data-testid="stToolbar"] {visibility: hidden;}
-        </style>
-        """
-st.markdown(hide_menu_style, unsafe_allow_html=True)
+    /* Target the sidebar collapse button and hide it */
+    [data-testid="collapsedControl"] {
+        display: none;
+    }
+
+    /* Disable the ability to collapse the sidebar via dragging */
+    [data-testid="stSidebar"] {
+        min-width: 300px;
+        max-width: 300px;
+    }
+    
+    /* Ensure the main content doesn't jump when loading */
+    .block-container {
+        padding-top: 2rem;
+    }
+    </style>
+    """
+st.markdown(lock_sidebar_style, unsafe_allow_html=True)
 
 # ==========================================
 # PAGE ROUTING SETUP
@@ -61,7 +62,7 @@ st.sidebar.divider()
 # ==========================================
 if st.session_state.current_page == "admin":
     st.title("⚙️ User Management Dashboard")
-    st.write("Create configurations for users to access the system (if security is re-enabled).")
+    st.write("Create configurations for users to access the system.")
     
     st.info("💡 **Instructions:** Generate the code block below, then paste it under `[passwords]` in your Streamlit Cloud Secrets.")
     
@@ -71,8 +72,8 @@ if st.session_state.current_page == "admin":
         new_role = st.selectbox("User Role", ["Branch Manager", "Sector Manager", "HR Admin", "Finance Officer"])
         new_user = st.text_input("Username")
     with col2:
-        st.write("") # Spacer
-        st.write("") # Spacer
+        st.write("") 
+        st.write("") 
         new_pass = st.text_input("Password", type="password")
     
     if st.button("Generate Secure Access Code", type="primary"):
@@ -88,7 +89,6 @@ if st.session_state.current_page == "admin":
 else:
     st.title("4G Capital UPIA Incentive System 🏢")
     
-    # 2. Sidebar - Calculator Configuration
     st.sidebar.title("Configuration")
 
     eval_level = st.sidebar.selectbox(
@@ -103,7 +103,6 @@ else:
 
     st.sidebar.divider() 
 
-    # --- DYNAMIC CAPACITY SCALING ---
     scale_threshold = 1
     if eval_level != "Pairs (LO & CO)":
         st.sidebar.write("### ⚖️ Target Scaling Rules")
@@ -144,7 +143,6 @@ else:
     elif campaign_name == "Dormant Customers":
         dormant_cust_t = st.sidebar.number_input("Base Min Dormant Customers", value=2.0)
     elif campaign_name == "Collections":
-        st.sidebar.info("Select metrics:")
         use_coll_amt = st.sidebar.checkbox("Apply Min Collection Amount", value=True)
         if use_coll_amt: coll_amt_t = st.sidebar.number_input("Base Min Amount", value=50000.0)
         use_dd7 = st.sidebar.checkbox("Apply Min DD+7 (%)", value=True)
@@ -154,7 +152,6 @@ else:
     elif campaign_name == "Disbursements":
         disb_pct_t = st.sidebar.number_input("Min Disbursement (%)", value=100.0)
 
-    # 5. Main Screen
     st.write(f"**Level:** {eval_level} | **Campaign:** {campaign_name}")
 
     c1, c2 = st.columns(2)
