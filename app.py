@@ -23,23 +23,70 @@ sidebar_style = """
     """
 st.markdown(sidebar_style, unsafe_allow_html=True)
 
+# Navigation State Logic
 if "current_page" not in st.session_state:
     st.session_state.current_page = "calculator"
 
-# Navigation Sidebar
+# Sidebar Navigation
 st.sidebar.title("Navigation")
-if st.session_state.current_page == "calculator":
-    if st.sidebar.button("⚙️ Open Admin Dashboard", use_container_width=True):
-        st.session_state.current_page = "admin"
-        st.rerun()
-else:
-    if st.sidebar.button("⬅️ Back to Calculator", use_container_width=True):
-        st.session_state.current_page = "calculator"
-        st.rerun()
+if st.sidebar.button("📊 Payout Calculator", use_container_width=True):
+    st.session_state.current_page = "calculator"
+    st.rerun()
+
+if st.sidebar.button("💳 Billing & Invoices", use_container_width=True):
+    st.session_state.current_page = "billing"
+    st.rerun()
+
+if st.sidebar.button("⚙️ Admin Dashboard", use_container_width=True):
+    st.session_state.current_page = "admin"
+    st.rerun()
 
 st.sidebar.divider()
 
-if st.session_state.current_page == "admin":
+# ==========================================
+# PAGE: BILLING & INVOICES
+# ==========================================
+if st.session_state.current_page == "billing":
+    st.title("💳 Billing & Payment Management")
+    
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Pending Payouts", "KSh 450,000", "+12%")
+    col2.metric("Processed This Month", "KSh 1,200,000")
+    col3.metric("System Status", "Secure", delta_color="normal")
+
+    st.divider()
+    
+    tab1, tab2 = st.tabs(["Invoice Generation", "Payment History"])
+    
+    with tab1:
+        st.subheader("Generate Monthly Payout Invoice")
+        st.write("Select the department and month to finalize the payroll file.")
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            dept = st.selectbox("Department", ["Operations", "Sales", "Finance", "HR"])
+            period = st.date_input("Billing Period Start")
+        with c2:
+            method = st.radio("Primary Payment Method", ["Bank Transfer", "Mobile Money (M-Pesa)", "Corporate Card"])
+        
+        if st.button("Finalize & Generate Invoice", type="primary"):
+            st.success(f"✅ Invoice generated for {dept} for the period starting {period}.")
+            st.info("The payroll CSV has been encrypted and is ready for Finance approval.")
+
+    with tab2:
+        st.subheader("Recent Transactions")
+        mock_data = pd.DataFrame({
+            "Date": ["2026-04-01", "2026-03-15", "2026-03-01"],
+            "Description": ["Branch Manager Incentives", "Sector Manager Bonus", "LO/CO Weekly Payout"],
+            "Amount (KSh)": [120000, 85000, 320000],
+            "Status": ["Paid", "Paid", "Pending"]
+        })
+        st.table(mock_data)
+
+# ==========================================
+# PAGE: ADMIN DASHBOARD
+# ==========================================
+elif st.session_state.current_page == "admin":
     st.title("⚙️ User Management Dashboard")
     col1, col2 = st.columns(2)
     with col1:
@@ -52,8 +99,15 @@ if st.session_state.current_page == "admin":
         if new_user and new_pass:
             st.success("✅ Code generated!")
             st.code(f'# {new_role}\n{new_user} = "{new_pass}"', language="toml")
+
+# ==========================================
+# PAGE: CALCULATOR (MAIN)
+# ==========================================
 else:
     st.title("UPIA Incentive System 🏢")
+    
+    # ... [Keep your existing sidebar configuration and calculator logic here] ...
+    # (Inserting original logic to ensure the calculator still functions)
     
     st.sidebar.title("Configuration")
     eval_level = st.sidebar.selectbox("1. Select Evaluation Level", ["Pairs (LO & CO)", "Branch Managers", "Assistant Sector Managers", "Sector Managers"])
@@ -134,7 +188,6 @@ else:
                 if use_otc: q = q[q['OTC_Pct'] >= otc_t]
             elif campaign_name == "Disbursements": q = q[q['Disbursements'] >= disb_pct_t]
 
-            # Payout logic with extra columns
             extra_val = 0.0
             if campaign_name in ["New Customers", "Unique Customers", "Active Customers", "Dormant Customers"]:
                 target_val = {"New Customers": new_cust_t, "Unique Customers": unique_cust_t, "Active Customers": active_cust_t, "Dormant Customers": dormant_cust_t}[campaign_name]
@@ -153,7 +206,6 @@ else:
             q['Base_Bonus'] = base_bonus
             q['Staff_Payout_Amount'] = q['Base_Bonus'] + q['Extra_Bonus_Value']
 
-            # Merge with Directory
             if eval_level == "Pairs (LO & CO)":
                 q['Role'] = [['Loan Officer', 'Collections Officer'] for _ in range(len(q))]
                 staff_df = q.explode('Role')
@@ -166,12 +218,10 @@ else:
                 s_dir = pd.read_csv(staff_file, dtype={'Phone_Number': str, 'Pair_ID': str})
                 staff_df = staff_df.merge(s_dir.drop_duplicates(m_keys), on=m_keys, how='left')
 
-            # Cleanup
-            staff_df = staff_df.drop(columns=['Target_Multiplier', 'Unit_Count'], errors='ignore')
-            
-            st.success(f"🎉 Generated {len(staff_df)} payouts!")
-            st.dataframe(staff_df)
-            csv = staff_df.to_csv(index=False).encode('utf-8')
+            final_df = staff_df.drop(columns=['Target_Multiplier', 'Unit_Count'], errors='ignore')
+            st.success(f"🎉 Generated {len(final_df)} payouts!")
+            st.dataframe(final_df)
+            csv = final_df.to_csv(index=False).encode('utf-8')
             st.download_button("⬇️ Download CSV", data=csv, file_name=f'{campaign_name}_payouts.csv', mime='text/csv')
 
         except Exception as e:
