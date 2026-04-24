@@ -75,7 +75,7 @@ else:
 
     st.sidebar.divider() 
     
-    # Scaling Logic for aggregate levels
+    # Scaling Logic
     scale_threshold = 1
     if eval_level == "Assistant Sector Managers": 
         scale_threshold = st.sidebar.number_input("Standard ASM Branch Count", value=4)
@@ -83,18 +83,26 @@ else:
         scale_threshold = st.sidebar.number_input("Standard Sector Branch Count", value=25)
 
     st.sidebar.write("### 💵 Payout Settings")
-    base_bonus = st.sidebar.number_input("Base Bonus KES", value=3000.0, step=500.0)
+    base_bonus = st.sidebar.number_input("Base Bonus Amount", value=3000.0, step=500.0)
     
-    # Context-aware bonus settings
-    incremental_bonus = 0.0
-    disb_inc_rate = 1.0 
-    disb_bonus_step = 0.0
+    # Flexible Incremental Logic
+    bonus_step_count = 1.0
+    bonus_step_amount = 0.0
 
     if "Customers" in campaign_name:
-        incremental_bonus = st.sidebar.number_input("Extra Bonus (Per 2 Extra)", value=200.0, step=100.0)
+        col1, col2 = st.sidebar.columns(2)
+        with col1:
+            bonus_step_count = st.number_input("For every (Qty)", value=2.0, min_value=1.0, step=1.0)
+        with col2:
+            bonus_step_amount = st.number_input("Pay Extra ($)", value=200.0, step=50.0)
+        st.sidebar.caption(f"Calculated as: (${bonus_step_amount} per {bonus_step_count} extra {campaign_name.lower()})")
+
     elif campaign_name == "Disbursements":
-        disb_inc_rate = st.sidebar.number_input("Step: For every X% extra...", value=1.0, step=0.5, help="Example: For every 2.0% above target")
-        disb_bonus_step = st.sidebar.number_input("...Add this amount (KES)", value=200.0, step=50.0)
+        col1, col2 = st.sidebar.columns(2)
+        with col1:
+            bonus_step_count = st.number_input("For every (X%)", value=1.0, min_value=0.1, step=0.5)
+        with col2:
+            bonus_step_amount = st.number_input("Pay Extra ($)", value=200.0, step=50.0)
 
     st.sidebar.divider()
     st.sidebar.write("### 🎯 Target Customization")
@@ -103,43 +111,39 @@ else:
     
     if "Customers" in campaign_name:
         key = campaign_name.replace(" ", "_")
-        targets[key] = st.sidebar.number_input(f"Base Min {campaign_name}", value=6.0)
+        targets[key] = st.sidebar.number_input(f"Base Min {campaign_name} Required", value=6.0)
     elif campaign_name == "Collections":
         targets["coll_amt"] = st.sidebar.number_input("Base Min Amount", value=50000.0)
         targets["dd7"] = st.sidebar.number_input("Min DD+7 (%)", value=94.0)
         targets["otc"] = st.sidebar.number_input("Min OTC (%)", value=91.0)
     elif campaign_name == "Disbursements":
-        targets["disb_threshold"] = st.sidebar.number_input("Qualification Threshold (%)", value=100.0, help="Min percentage of target achieved to qualify for bonus.")
+        targets["disb_threshold"] = st.sidebar.number_input("Qualification Threshold (%)", value=100.0)
 
     # File Uploaders
     st.write(f"**Level:** {eval_level} | **Campaign:** {campaign_name}")
     c1, c2 = st.columns(2)
-    with c1: perf_file = st.file_uploader("1. Upload Performance CSV (Include Target_Amt & Actual_Amt for Disbursements)", type=['csv'])
+    with c1: perf_file = st.file_uploader("1. Upload Performance CSV", type=['csv'])
     with c2: staff_file = st.file_uploader("2. Upload Staff Directory CSV", type=['csv'])
 
     if perf_file:
         try:
             df = pd.read_csv(perf_file)
             
-            # Cleaning common columns
             num_cols = ['New_Customers', 'Unique_Customers', 'Active_Customers', 'Dormant_Customers', 
                         'Amount_Collected', 'DD_Plus_7_Pct', 'OTC_Pct', 'Disb_Target', 'Disb_Actual']
             for col in num_cols:
                 if col in df.columns:
                     df[col] = clean_numeric(df[col])
             
-            # Level Aggregation logic
             group_key = LEVEL_CONFIG[eval_level]["group_key"]
             unit_col = LEVEL_CONFIG[eval_level]["unit_name"]
             
             if group_key:
                 unit_counts = df.groupby(group_key)[unit_col].nunique().reset_index(name='Unit_Count')
-                # Summing totals, averaging percentages
                 agg_dict = {c: 'sum' for c in ['New_Customers', 'Unique_Customers', 'Active_Customers', 'Dormant_Customers', 'Amount_Collected', 'Disb_Target', 'Disb_Actual'] if c in df.columns}
                 agg_dict.update({c: 'mean' for c in ['DD_Plus_7_Pct', 'OTC_Pct'] if c in df.columns})
                 eval_df = df.groupby(group_key).agg(agg_dict).reset_index().merge(unit_counts, on=group_key)
                 
-                # Multiplier logic
                 if eval_level == "Branch Managers":
                     eval_df['Multiplier'] = eval_df['Unit_Count'].astype(float)
                 else:
@@ -156,7 +160,8 @@ else:
                 col = campaign_name.replace(" ", "_")
                 q = q[q[col] >= (targets[col] * m)]
                 q['Extra_Achieved'] = (q[col] - (targets[col] * m)).clip(lower=0)
-                q['Extra_Bonus_Value'] = np.floor(q['Extra_Achieved'] / 2) * incremental_bonus
+                # DYNAMIC STEP CALCULATION
+                q['Extra_Bonus_Value'] = np.floor(q['Extra_Achieved'] / bonus_step_count) * bonus_step_amount
                 
             elif campaign_name == "Collections":
                 q = q[(q['Amount_Collected'] >= (targets["coll_amt"] * m)) & 
@@ -165,44 +170,43 @@ else:
                 q['Extra_Bonus_Value'] = 0.0
                 
             elif campaign_name == "Disbursements":
-                # Calculate % from data
                 q['Disb_Achievement_Pct'] = (q['Disb_Actual'] / q['Disb_Target'] * 100).fillna(0)
-                # Qualification filter
                 q = q[q['Disb_Achievement_Pct'] >= targets["disb_threshold"]]
-                # Extra Bonus logic
                 q['Pct_Above_Threshold'] = (q['Disb_Achievement_Pct'] - targets["disb_threshold"]).clip(lower=0)
-                q['Extra_Bonus_Value'] = np.floor(q['Pct_Above_Threshold'] / disb_inc_rate) * disb_bonus_step
+                # DYNAMIC STEP CALCULATION
+                q['Extra_Bonus_Value'] = np.floor(q['Pct_Above_Threshold'] / bonus_step_count) * bonus_step_amount
 
             q['Base_Bonus'] = base_bonus
             q['Staff_Payout_Amount'] = q['Base_Bonus'] + q.get('Extra_Bonus_Value', 0)
 
-            # Map to Staff
+            # Staff Mapping
             if eval_level == "Pairs (LO & CO)":
                 q['Role'] = [['Loan Officer', 'Collections Officer'] for _ in range(len(q))]
                 staff_df = q.explode('Role')
-                merge_keys = ['Branch', 'Pair_ID', 'Role']
+                m_keys = ['Branch', 'Pair_ID', 'Role']
             else:
                 staff_df = q.assign(Role=eval_level.rstrip('s'))
-                merge_keys = [group_key, 'Role']
+                m_keys = [group_key, 'Role']
 
             if staff_file:
                 s_dir = pd.read_csv(staff_file, dtype={'Phone_Number': str, 'Pair_ID': str})
-                staff_df = staff_df.merge(s_dir.drop_duplicates(merge_keys), on=merge_keys, how='left')
+                staff_df = staff_df.merge(s_dir.drop_duplicates(m_keys), on=m_keys, how='left')
 
-            # --- Metrics & Results ---
+            # --- Output UI ---
             if not staff_df.empty:
                 st.divider()
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Total Payout", f"${staff_df['Staff_Payout_Amount'].sum():,.2f}")
-                c2.metric("Qualifying Staff", len(staff_df))
-                c3.metric("Avg. Bonus", f"${staff_df['Staff_Payout_Amount'].mean():,.2f}")
+                st.subheader(f"Results Summary")
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Total Payout", f"${staff_df['Staff_Payout_Amount'].sum():,.2f}")
+                m2.metric("Eligible Staff", len(staff_df))
+                m3.metric("Avg. Bonus", f"${staff_df['Staff_Payout_Amount'].mean():,.2f}")
 
                 st.dataframe(staff_df, use_container_width=True)
                 
                 csv = staff_df.to_csv(index=False).encode('utf-8')
-                st.download_button("⬇️ Download Report", data=csv, file_name=f'Payouts_{campaign_name}.csv', mime='text/csv', type="primary")
+                st.download_button("⬇️ Download Final Report", data=csv, file_name=f'Incentive_Report_{campaign_name}.csv', mime='text/csv', type="primary")
             else:
-                st.warning("No staff met the requirements for this campaign selection.")
+                st.warning("No staff members qualified based on current settings.")
 
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"Error processing data: {e}")
