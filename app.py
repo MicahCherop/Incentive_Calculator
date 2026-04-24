@@ -85,7 +85,6 @@ else:
     st.sidebar.write("### 💵 Payout Settings")
     base_bonus = st.sidebar.number_input("Base Bonus Amount", value=3000.0, step=500.0)
     
-    # Flexible Incremental Logic
     bonus_step_count = 1.0
     bonus_step_amount = 0.0
 
@@ -95,8 +94,6 @@ else:
             bonus_step_count = st.number_input("For every (Qty)", value=2.0, min_value=1.0, step=1.0)
         with col2:
             bonus_step_amount = st.number_input("Pay Extra (kes)", value=200.0, step=50.0)
-        st.sidebar.caption(f"Calculated as: (kes{bonus_step_amount} per {bonus_step_count} extra {campaign_name.lower()})")
-
     elif campaign_name == "Disbursements":
         col1, col2 = st.sidebar.columns(2)
         with col1:
@@ -107,17 +104,39 @@ else:
     st.sidebar.divider()
     st.sidebar.write("### 🎯 Target Customization")
     
-    targets = {"New_Customers": 0.0, "Unique_Customers": 0.0, "Active_Customers": 0.0, "Dormant_Customers": 0.0, "coll_amt": 0.0, "dd7": 0.0, "otc": 0.0, "disb_threshold": 0.0}
-    
+    targets = {}
+    active_filters = []
+
     if "Customers" in campaign_name:
         key = campaign_name.replace(" ", "_")
         targets[key] = st.sidebar.number_input(f"Base Min {campaign_name} Required", value=6.0)
+        active_filters.append(key)
+    
     elif campaign_name == "Collections":
-        targets["coll_amt"] = st.sidebar.number_input("Base Min Amount", value=50000.0)
-        targets["dd7"] = st.sidebar.number_input("Min DD+7 (%)", value=94.0)
-        targets["otc"] = st.sidebar.number_input("Min OTC (%)", value=91.0)
+        # Checkboxes for flexible criteria
+        use_amt = st.sidebar.checkbox("Filter by Amount Collected", value=True)
+        if use_amt:
+            targets["Amount_Collected"] = st.sidebar.number_input("Min Amount", value=50000.0)
+            active_filters.append("Amount_Collected")
+        
+        use_otc = st.sidebar.checkbox("Filter by OTC %", value=True)
+        if use_otc:
+            targets["OTC_Pct"] = st.sidebar.number_input("Min OTC (%)", value=91.0)
+            active_filters.append("OTC_Pct")
+            
+        use_dd7 = st.sidebar.checkbox("Filter by DD+7 %", value=True)
+        if use_dd7:
+            targets["DD_Plus_7_Pct"] = st.sidebar.number_input("Min DD+7 (%)", value=94.0)
+            active_filters.append("DD_Plus_7_Pct")
+
+        use_overall = st.sidebar.checkbox("Filter by Overall Collection %", value=False)
+        if use_overall:
+            targets["Overall_Collection_Pct"] = st.sidebar.number_input("Min Overall Collection (%)", value=95.0)
+            active_filters.append("Overall_Collection_Pct")
+            
     elif campaign_name == "Disbursements":
         targets["disb_threshold"] = st.sidebar.number_input("Qualification Threshold (%)", value=100.0)
+        active_filters.append("disb_threshold")
 
     # File Uploaders
     st.write(f"**Level:** {eval_level} | **Campaign:** {campaign_name}")
@@ -128,9 +147,10 @@ else:
     if perf_file:
         try:
             df = pd.read_csv(perf_file)
-            
+            # Added Overall_Collection_Pct to clean list
             num_cols = ['New_Customers', 'Unique_Customers', 'Active_Customers', 'Dormant_Customers', 
-                        'Amount_Collected', 'DD_Plus_7_Pct', 'OTC_Pct', 'Disb_Target', 'Disb_Actual']
+                        'Amount_Collected', 'DD_Plus_7_Pct', 'OTC_Pct', 'Overall_Collection_Pct', 
+                        'Disb_Target', 'Disb_Actual']
             for col in num_cols:
                 if col in df.columns:
                     df[col] = clean_numeric(df[col])
@@ -141,13 +161,10 @@ else:
             if group_key:
                 unit_counts = df.groupby(group_key)[unit_col].nunique().reset_index(name='Unit_Count')
                 agg_dict = {c: 'sum' for c in ['New_Customers', 'Unique_Customers', 'Active_Customers', 'Dormant_Customers', 'Amount_Collected', 'Disb_Target', 'Disb_Actual'] if c in df.columns}
-                agg_dict.update({c: 'mean' for c in ['DD_Plus_7_Pct', 'OTC_Pct'] if c in df.columns})
+                # Added Overall_Collection_Pct to mean aggregation
+                agg_dict.update({c: 'mean' for c in ['DD_Plus_7_Pct', 'OTC_Pct', 'Overall_Collection_Pct'] if c in df.columns})
                 eval_df = df.groupby(group_key).agg(agg_dict).reset_index().merge(unit_counts, on=group_key)
-                
-                if eval_level == "Branch Managers":
-                    eval_df['Multiplier'] = eval_df['Unit_Count'].astype(float)
-                else:
-                    eval_df['Multiplier'] = np.where(eval_df['Unit_Count'] > scale_threshold, eval_df['Unit_Count'] / scale_threshold, 1.0)
+                eval_df['Multiplier'] = eval_df['Unit_Count'].astype(float) if eval_level == "Branch Managers" else np.where(eval_df['Unit_Count'] > scale_threshold, eval_df['Unit_Count'] / scale_threshold, 1.0)
             else:
                 eval_df = df.copy()
                 eval_df['Multiplier'] = 1.0
@@ -156,28 +173,30 @@ else:
             q = eval_df.copy()
             m = q['Multiplier']
             
+            # Apply active filters dynamically
+            for filter_key in active_filters:
+                if filter_key == "Amount_Collected":
+                    q = q[q[filter_key] >= (targets[filter_key] * m)]
+                elif filter_key in ["OTC_Pct", "DD_Plus_7_Pct", "Overall_Collection_Pct"]:
+                    q = q[q[filter_key] >= targets[filter_key]]
+                elif "Customers" in campaign_name:
+                    q = q[q[filter_key] >= (targets[filter_key] * m)]
+
+            # Calculate Extra Bonuses
             if "Customers" in campaign_name:
                 col = campaign_name.replace(" ", "_")
-                q = q[q[col] >= (targets[col] * m)]
                 q['Extra_Achieved'] = (q[col] - (targets[col] * m)).clip(lower=0)
-                # DYNAMIC STEP CALCULATION
                 q['Extra_Bonus_Value'] = np.floor(q['Extra_Achieved'] / bonus_step_count) * bonus_step_amount
-                
-            elif campaign_name == "Collections":
-                q = q[(q['Amount_Collected'] >= (targets["coll_amt"] * m)) & 
-                      (q['DD_Plus_7_Pct'] >= targets["dd7"]) & 
-                      (q['OTC_Pct'] >= targets["otc"])]
-                q['Extra_Bonus_Value'] = 0.0
-                
             elif campaign_name == "Disbursements":
                 q['Disb_Achievement_Pct'] = (q['Disb_Actual'] / q['Disb_Target'] * 100).fillna(0)
                 q = q[q['Disb_Achievement_Pct'] >= targets["disb_threshold"]]
                 q['Pct_Above_Threshold'] = (q['Disb_Achievement_Pct'] - targets["disb_threshold"]).clip(lower=0)
-                # DYNAMIC STEP CALCULATION
                 q['Extra_Bonus_Value'] = np.floor(q['Pct_Above_Threshold'] / bonus_step_count) * bonus_step_amount
+            else:
+                q['Extra_Bonus_Value'] = 0.0
 
             q['Base_Bonus'] = base_bonus
-            q['Staff_Payout_Amount'] = q['Base_Bonus'] + q.get('Extra_Bonus_Value', 0)
+            q['Staff_Payout_Amount'] = q['Base_Bonus'] + q['Extra_Bonus_Value']
 
             # Staff Mapping
             if eval_level == "Pairs (LO & CO)":
@@ -192,21 +211,18 @@ else:
                 s_dir = pd.read_csv(staff_file, dtype={'Phone_Number': str, 'Pair_ID': str})
                 staff_df = staff_df.merge(s_dir.drop_duplicates(m_keys), on=m_keys, how='left')
 
-            # --- Output UI ---
+            # --- Final Display ---
             if not staff_df.empty:
                 st.divider()
-                st.subheader(f"Results Summary")
                 m1, m2, m3 = st.columns(3)
-                m1.metric("Total Payout", f"kes{staff_df['Staff_Payout_Amount'].sum():,.2f}")
-                m2.metric("Eligible Staff", len(staff_df))
-                m3.metric("Avg. Bonus", f"kes{staff_df['Staff_Payout_Amount'].mean():,.2f}")
-
+                m1.metric("Total Payout", f"kes {staff_df['Staff_Payout_Amount'].sum():,.2f}")
+                m2.metric("Qualifying Staff", len(staff_df))
+                m3.metric("Avg. Bonus", f"kes {staff_df['Staff_Payout_Amount'].mean():,.2f}")
                 st.dataframe(staff_df, use_container_width=True)
-                
                 csv = staff_df.to_csv(index=False).encode('utf-8')
-                st.download_button("⬇️ Download Final Report", data=csv, file_name=f'Incentive_Report_{campaign_name}.csv', mime='text/csv', type="primary")
+                st.download_button("⬇️ Download Final Report", data=csv, file_name=f'Collections_Report.csv', mime='text/csv', type="primary")
             else:
-                st.warning("No staff members qualified based on current settings.")
+                st.warning("No staff members qualified with the selected criteria.")
 
         except Exception as e:
-            st.error(f"Error processing data: {e}")
+            st.error(f"Error: {e}")
