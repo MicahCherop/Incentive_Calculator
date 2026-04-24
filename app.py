@@ -10,21 +10,23 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- 🔒 LOCK SIDEBAR & HIDE BRANDING ---
-# This CSS hides the collapse button and prevents the sidebar from being closed
-lock_sidebar_style = """
+# --- 🔓 SIDEBAR TOGGLE VISIBLE & HIDE BRANDING ---
+# This CSS hides the branding but keeps the top-left sidebar toggle active
+sidebar_style = """
     <style>
     /* Hide the top right hamburger menu and footer */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    header {visibility: hidden;}
 
-    /* Target the sidebar collapse button and hide it */
-    [data-testid="collapsedControl"] {
-        display: none;
-    }
+    /* Hide the Streamlit Cloud deployment decoration */
+    .stAppDeployButton {display:none;}
+    
+    /* Make the header transparent so it looks clean but keeps the toggle button functional */
+    [data-testid="stHeader"] {
+        background: rgba(0,0,0,0); 
+    } 
 
-    /* Disable the ability to collapse the sidebar via dragging */
+    /* Control sidebar width without breaking the collapse function */
     [data-testid="stSidebar"] {
         min-width: 300px;
         max-width: 300px;
@@ -36,7 +38,7 @@ lock_sidebar_style = """
     }
     </style>
     """
-st.markdown(lock_sidebar_style, unsafe_allow_html=True)
+st.markdown(sidebar_style, unsafe_allow_html=True)
 
 # ==========================================
 # PAGE ROUTING SETUP
