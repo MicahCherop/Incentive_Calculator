@@ -4,7 +4,7 @@ import numpy as np
 
 # 1. Page Setup - Force Expanded State
 st.set_page_config(
-    page_title="4G Capital UPIA Incentive System", 
+    page_title="UPIA Incentive System", 
     page_icon="🏢", 
     layout="wide",
     initial_sidebar_state="expanded"
@@ -89,7 +89,7 @@ if st.session_state.current_page == "admin":
 # PAGE 2: THE MAIN CALCULATOR APP
 # ==========================================
 else:
-    st.title("4G Capital UPIA Incentive System 🏢")
+    st.title("UPIA Incentive System 🏢")
     
     st.sidebar.title("Configuration")
 
@@ -240,6 +240,9 @@ else:
                 for col in org_keys + ['Role']:
                     if col in s_dir.columns: s_dir[col] = s_dir[col].astype(str).str.strip().str.title()
                 staff_df = staff_df.merge(s_dir.drop_duplicates(m_keys), on=m_keys, how='left')
+
+            # --- REMOVE UNWANTED COLUMNS ---
+            staff_df = staff_df.drop(columns=['Target_Multiplier', 'Unit_Count'], errors='ignore')
 
             st.success(f"🎉 Generated {len(staff_df)} payouts!")
             st.dataframe(staff_df)
