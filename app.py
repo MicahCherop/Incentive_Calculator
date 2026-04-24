@@ -3,7 +3,12 @@ import pandas as pd
 import numpy as np
 
 # 1. Page Setup
-st.set_page_config(page_title="4G Capital UPIA Incentive System", page_icon="🏢", layout="wide")
+st.set_page_config(
+    page_title="4G Capital UPIA Incentive System", 
+    page_icon="🏢", 
+    layout="wide",
+    initial_sidebar_state="expanded" # This keeps it open when the page loads
+)
 
 # --- ULTIMATE CLEAN UI (KEEPS SIDEBAR TOGGLE VISIBLE) ---
 hide_menu_style = """
