@@ -43,7 +43,7 @@ if st.session_state.current_page == "admin":
     st.title("⚙️ User Management Dashboard")
     col1, col2 = st.columns(2)
     with col1:
-        new_role = st.selectbox("User Role", ["Branch Manager", "Sector Manager", "HR Admin", "Finance Officer"])
+        new_role = st.selectbox("User Role", ["UPIA OpsAdmin", "Finance Officer"])
         new_user = st.text_input("Username")
     with col2:
         new_pass = st.text_input("Password", type="password")
@@ -90,9 +90,9 @@ else:
         use_coll_amt = st.sidebar.checkbox("Apply Min Collection Amount", value=True)
         if use_coll_amt: coll_amt_t = st.sidebar.number_input("Base Min Amount", value=50000.0)
         use_dd7 = st.sidebar.checkbox("Apply Min DD+7 (%)", value=True)
-        if use_dd7: dd7_t = st.sidebar.number_input("Min DD+7 (%)", value=80.0)
+        if use_dd7: dd7_t = st.sidebar.number_input("Min DD+7 (%)", value=94.0)
         use_otc = st.sidebar.checkbox("Apply Min OTC (%)", value=True)
-        if use_otc: otc_t = st.sidebar.number_input("Min OTC (%)", value=75.0)
+        if use_otc: otc_t = st.sidebar.number_input("Min OTC (%)", value=91.0)
     elif campaign_name == "Disbursements": disb_pct_t = st.sidebar.number_input("Min Disbursement (%)", value=100.0)
 
     st.write(f"**Level:** {eval_level} | **Campaign:** {campaign_name}")
