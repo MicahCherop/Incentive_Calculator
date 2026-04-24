@@ -10,8 +10,8 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- 🔓 SIDEBAR TOGGLE VISIBLE & HIDE BRANDING ---
-sidebar_style = """
+# --- 🔓 UI CUSTOMIZATION ---
+st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
@@ -20,13 +20,21 @@ sidebar_style = """
     [data-testid="stSidebar"] { min-width: 300px; max-width: 300px; }
     .block-container { padding-top: 2rem; }
     </style>
-    """
-st.markdown(sidebar_style, unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
 
+# 2. State Management
 if "current_page" not in st.session_state:
     st.session_state.current_page = "calculator"
 
-# Navigation Sidebar
+# 3. Helper Functions
+def clean_numeric(series):
+    """Clean currency, percentages, and commas from strings and return floats."""
+    return pd.to_numeric(
+        series.astype(str).replace(r'[^-0-9.]', '', regex=True), 
+        errors='coerce'
+    ).fillna(0)
+
+# 4. Navigation Sidebar
 st.sidebar.title("Navigation")
 if st.session_state.current_page == "calculator":
     if st.sidebar.button("⚙️ Open Admin Dashboard", use_container_width=True):
@@ -39,8 +47,10 @@ else:
 
 st.sidebar.divider()
 
+# --- ADMIN PAGE ---
 if st.session_state.current_page == "admin":
     st.title("⚙️ User Management Dashboard")
+    st.info("Note: This interface simulates access code generation for local configuration.")
     col1, col2 = st.columns(2)
     with col1:
         new_role = st.selectbox("User Role", ["UPIA OpsAdmin", "Finance Officer"])
@@ -50,51 +60,67 @@ if st.session_state.current_page == "admin":
     
     if st.button("Generate Secure Access Code", type="primary"):
         if new_user and new_pass:
-            st.success("✅ Code generated!")
+            st.success("✅ Access snippet generated! Copy this to your secrets file.")
             st.code(f'# {new_role}\n{new_user} = "{new_pass}"', language="toml")
+
+# --- CALCULATOR PAGE ---
 else:
     st.title("UPIA Incentive System 🏢")
     
+    # Configuration Mapping
+    LEVEL_CONFIG = {
+        "Pairs (LO & CO)": {"group_key": None, "unit_name": "Pair"},
+        "Branch Managers": {"group_key": "Branch", "unit_name": "Pair_ID"},
+        "Assistant Sector Managers": {"group_key": "Subsector", "unit_name": "Branch"},
+        "Sector Managers": {"group_key": "Sector", "unit_name": "Branch"}
+    }
+
     st.sidebar.title("Configuration")
-    eval_level = st.sidebar.selectbox("1. Select Evaluation Level", ["Pairs (LO & CO)", "Branch Managers", "Assistant Sector Managers", "Sector Managers"])
+    eval_level = st.sidebar.selectbox("1. Select Evaluation Level", list(LEVEL_CONFIG.keys()))
     campaign_name = st.sidebar.selectbox("2. Select Campaign", ["New Customers", "Unique Customers", "Active Customers", "Dormant Customers", "Collections", "Disbursements"])
 
     st.sidebar.divider() 
+    
+    # Scaling Logic
     scale_threshold = 1
-    if eval_level != "Pairs (LO & CO)":
-        if eval_level == "Assistant Sector Managers": scale_threshold = st.sidebar.number_input("Standard ASM Branch Count", value=4)
-        elif eval_level == "Sector Managers": scale_threshold = st.sidebar.number_input("Standard Sector Branch Count", value=25)
+    if eval_level == "Assistant Sector Managers": 
+        scale_threshold = st.sidebar.number_input("Standard ASM Branch Count", value=4)
+    elif eval_level == "Sector Managers": 
+        scale_threshold = st.sidebar.number_input("Standard Sector Branch Count", value=25)
 
     st.sidebar.write("### 💵 Payout Settings")
     base_bonus = st.sidebar.number_input("Base Bonus", value=3000.0, step=500.0)
+    
+    # Context-aware bonus settings
     incremental_bonus = 0.0
     disbursement_bonus_step = 0.0
     disb_inc_rate = 1.0 
 
     if campaign_name in ["New Customers", "Unique Customers", "Active Customers", "Dormant Customers"]:
-        incremental_bonus = st.sidebar.number_input("Extra Bonus (Per 2 Extra Customers)", value=200.0, step=100.0)
+        incremental_bonus = st.sidebar.number_input("Extra Bonus (Per 2 Extra)", value=200.0, step=100.0)
     elif campaign_name == "Disbursements":
         disb_inc_rate = st.sidebar.number_input("Reward for every X% extra", value=1.0, step=0.5)
         disbursement_bonus_step = st.sidebar.number_input(f"Extra Bonus (Per {disb_inc_rate}% Extra)", value=200.0, step=50.0)
 
     st.sidebar.divider()
     st.sidebar.write("### 🎯 Target Customization")
-    new_cust_t = unique_cust_t = active_cust_t = dormant_cust_t = coll_amt_t = dd7_t = otc_t = disb_pct_t = 0.0
-    use_coll_amt = use_dd7 = use_otc = False
-
-    if campaign_name == "New Customers": new_cust_t = st.sidebar.number_input("Base Min New Customers", value=6.0)
-    elif campaign_name == "Unique Customers": unique_cust_t = st.sidebar.number_input("Base Min Unique Customers", value=6.0)
-    elif campaign_name == "Active Customers": active_cust_t = st.sidebar.number_input("Base Min Active Customers", value=10.0)
-    elif campaign_name == "Dormant Customers": dormant_cust_t = st.sidebar.number_input("Base Min Dormant Customers", value=2.0)
+    # Initialize targets
+    targets = {"New_Customers": 0.0, "Unique_Customers": 0.0, "Active_Customers": 0.0, "Dormant_Customers": 0.0, "coll_amt": 0.0, "dd7": 0.0, "otc": 0.0, "disb": 0.0}
+    
+    if "Customers" in campaign_name:
+        key = campaign_name.replace(" ", "_")
+        targets[key] = st.sidebar.number_input(f"Base Min {campaign_name}", value=6.0)
     elif campaign_name == "Collections":
         use_coll_amt = st.sidebar.checkbox("Apply Min Collection Amount", value=True)
-        if use_coll_amt: coll_amt_t = st.sidebar.number_input("Base Min Amount", value=50000.0)
+        if use_coll_amt: targets["coll_amt"] = st.sidebar.number_input("Base Min Amount", value=50000.0)
         use_dd7 = st.sidebar.checkbox("Apply Min DD+7 (%)", value=True)
-        if use_dd7: dd7_t = st.sidebar.number_input("Min DD+7 (%)", value=94.0)
+        if use_dd7: targets["dd7"] = st.sidebar.number_input("Min DD+7 (%)", value=94.0)
         use_otc = st.sidebar.checkbox("Apply Min OTC (%)", value=True)
-        if use_otc: otc_t = st.sidebar.number_input("Min OTC (%)", value=91.0)
-    elif campaign_name == "Disbursements": disb_pct_t = st.sidebar.number_input("Min Disbursement (%)", value=100.0)
+        if use_otc: targets["otc"] = st.sidebar.number_input("Min OTC (%)", value=91.0)
+    elif campaign_name == "Disbursements":
+        targets["disb"] = st.sidebar.number_input("Min Disbursement (%)", value=100.0)
 
+    # File Uploaders
     st.write(f"**Level:** {eval_level} | **Campaign:** {campaign_name}")
     c1, c2 = st.columns(2)
     with c1: perf_file = st.file_uploader("1. Upload Performance CSV", type=['csv'])
@@ -103,76 +129,88 @@ else:
     if perf_file:
         try:
             df = pd.read_csv(perf_file)
+            
+            # Use robust cleaning function
             num_cols = ['New_Customers', 'Unique_Customers', 'Active_Customers', 'Dormant_Customers', 'Amount_Collected', 'DD_Plus_7_Pct', 'OTC_Pct', 'Disbursements']
             for col in num_cols:
                 if col in df.columns:
-                    df[col] = pd.to_numeric(df[col].astype(str).str.replace(r'[%$,]', '', regex=True), errors='coerce').fillna(0)
+                    df[col] = clean_numeric(df[col])
             
+            # Aggregate based on Level
             eval_df = df.copy()
-            eval_df['Target_Multiplier'] = 1.0
-            group_key = {'Branch Managers': 'Branch', 'Assistant Sector Managers': 'Subsector', 'Sector Managers': 'Sector'}.get(eval_level)
+            group_key = LEVEL_CONFIG[eval_level]["group_key"]
+            unit_col = LEVEL_CONFIG[eval_level]["unit_name"]
             
             if group_key:
-                unit_counts = df.groupby(group_key)['Pair_ID' if eval_level == 'Branch Managers' else 'Branch'].nunique().reset_index(name='Unit_Count')
+                unit_counts = df.groupby(group_key)[unit_col].nunique().reset_index(name='Unit_Count')
                 agg = {c: 'sum' for c in ['New_Customers', 'Unique_Customers', 'Active_Customers', 'Dormant_Customers', 'Amount_Collected'] if c in df.columns}
                 agg.update({c: 'mean' for c in ['DD_Plus_7_Pct', 'OTC_Pct', 'Disbursements'] if c in df.columns})
                 eval_df = df.groupby(group_key).agg(agg).reset_index().merge(unit_counts, on=group_key)
-                if eval_level == "Branch Managers": eval_df['Target_Multiplier'] = eval_df['Unit_Count'].astype(float)
-                else: eval_df['Target_Multiplier'] = np.where(eval_df['Unit_Count'] > scale_threshold, eval_df['Unit_Count'] / scale_threshold, 1.0)
-
-            q = eval_df.copy()
-            mult = q.get('Target_Multiplier', 1.0)
-            
-            # Filter logic
-            if campaign_name == "New Customers": q = q[q['New_Customers'] >= (new_cust_t * mult)]
-            elif campaign_name == "Unique Customers": q = q[q['Unique_Customers'] >= (unique_cust_t * mult)]
-            elif campaign_name == "Active Customers": q = q[q['Active_Customers'] >= (active_cust_t * mult)]
-            elif campaign_name == "Dormant Customers": q = q[q['Dormant_Customers'] >= (dormant_cust_t * mult)]
-            elif campaign_name == "Collections":
-                if use_coll_amt: q = q[q['Amount_Collected'] >= (coll_amt_t * mult)]
-                if use_dd7: q = q[q['DD_Plus_7_Pct'] >= dd7_t]
-                if use_otc: q = q[q['OTC_Pct'] >= otc_t]
-            elif campaign_name == "Disbursements": q = q[q['Disbursements'] >= disb_pct_t]
-
-            # Payout logic with extra columns
-            extra_val = 0.0
-            if campaign_name in ["New Customers", "Unique Customers", "Active Customers", "Dormant Customers"]:
-                target_val = {"New Customers": new_cust_t, "Unique Customers": unique_cust_t, "Active Customers": active_cust_t, "Dormant Customers": dormant_cust_t}[campaign_name]
-                col_name = campaign_name.replace(" ", "_")
-                extra_val = (q[col_name] - (target_val * mult)).clip(lower=0)
-                q['Extra_Achieved'] = extra_val
-                q['Extra_Bonus_Value'] = np.floor(extra_val / 2) * incremental_bonus
-            elif campaign_name == "Disbursements":
-                extra_val = (q['Disbursements'] - disb_pct_t).clip(lower=0)
-                q['Extra_Achieved'] = extra_val
-                q['Extra_Bonus_Value'] = np.floor(extra_val / disb_inc_rate) * disbursement_bonus_step
+                
+                if eval_level == "Branch Managers":
+                    eval_df['Multiplier'] = eval_df['Unit_Count'].astype(float)
+                else:
+                    eval_df['Multiplier'] = np.where(eval_df['Unit_Count'] > scale_threshold, eval_df['Unit_Count'] / scale_threshold, 1.0)
             else:
-                q['Extra_Achieved'] = 0
-                q['Extra_Bonus_Value'] = 0
+                eval_df['Multiplier'] = 1.0
+
+            # Filtering Logic
+            q = eval_df.copy()
+            m = q['Multiplier']
+            
+            if "Customers" in campaign_name:
+                col = campaign_name.replace(" ", "_")
+                q = q[q[col] >= (targets[col] * m)]
+                q['Extra_Achieved'] = (q[col] - (targets[col] * m)).clip(lower=0)
+                q['Extra_Bonus_Value'] = np.floor(q['Extra_Achieved'] / 2) * incremental_bonus
+            elif campaign_name == "Collections":
+                if targets["coll_amt"] > 0: q = q[q['Amount_Collected'] >= (targets["coll_amt"] * m)]
+                if targets["dd7"] > 0: q = q[q['DD_Plus_7_Pct'] >= targets["dd7"]]
+                if targets["otc"] > 0: q = q[q['OTC_Pct'] >= targets["otc"]]
+                q['Extra_Bonus_Value'] = 0.0
+            elif campaign_name == "Disbursements":
+                q = q[q['Disbursements'] >= targets["disb"]]
+                q['Extra_Achieved'] = (q['Disbursements'] - targets["disb"]).clip(lower=0)
+                q['Extra_Bonus_Value'] = np.floor(q['Extra_Achieved'] / disb_inc_rate) * disbursement_bonus_step
 
             q['Base_Bonus'] = base_bonus
-            q['Staff_Payout_Amount'] = q['Base_Bonus'] + q['Extra_Bonus_Value']
+            q['Staff_Payout_Amount'] = q['Base_Bonus'] + q.get('Extra_Bonus_Value', 0)
 
-            # Merge with Directory
+            # Map Staff Details
             if eval_level == "Pairs (LO & CO)":
                 q['Role'] = [['Loan Officer', 'Collections Officer'] for _ in range(len(q))]
                 staff_df = q.explode('Role')
-                m_keys = ['Branch', 'Pair_ID', 'Role']
+                merge_keys = ['Branch', 'Pair_ID', 'Role']
             else:
-                staff_df = q.assign(Role=eval_level.rstrip('s'))
-                m_keys = [{'Branch Managers': 'Branch', 'Assistant Sector Managers': 'Subsector', 'Sector Managers': 'Sector'}[eval_level], 'Role']
+                role_name = eval_level.rstrip('s') # Convert Managers -> Manager
+                staff_df = q.assign(Role=role_name)
+                merge_keys = [group_key, 'Role']
 
             if staff_file:
                 s_dir = pd.read_csv(staff_file, dtype={'Phone_Number': str, 'Pair_ID': str})
-                staff_df = staff_df.merge(s_dir.drop_duplicates(m_keys), on=m_keys, how='left')
+                staff_df = staff_df.merge(s_dir.drop_duplicates(merge_keys), on=merge_keys, how='left')
 
-            # Cleanup
-            staff_df = staff_df.drop(columns=['Target_Multiplier', 'Unit_Count'], errors='ignore')
-            
-            st.success(f"🎉 Generated {len(staff_df)} payouts!")
-            st.dataframe(staff_df)
-            csv = staff_df.to_csv(index=False).encode('utf-8')
-            st.download_button("⬇️ Download CSV", data=csv, file_name=f'{campaign_name}_payouts.csv', mime='text/csv')
+            # --- DISPLAY RESULTS ---
+            if not staff_df.empty:
+                st.divider()
+                # Summary Metrics
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Total Payout Budget", f"${staff_df['Staff_Payout_Amount'].sum():,.2f}")
+                m2.metric("Eligible Recipients", len(staff_df))
+                m3.metric("Avg. Payout", f"${staff_df['Staff_Payout_Amount'].mean():,.2f}")
+
+                st.dataframe(staff_df, use_container_width=True)
+                
+                csv = staff_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="⬇️ Download Payout Report",
+                    data=csv,
+                    file_name=f'UPIA_{campaign_name}_{eval_level}.csv',
+                    mime='text/csv',
+                    type="primary"
+                )
+            else:
+                st.warning("⚠️ No staff members met the performance criteria for this selection.")
 
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"Critical Error processing files: {e}")
