@@ -94,15 +94,15 @@ else:
         with col1:
             bonus_step_count = st.number_input("For every (Qty)", value=2.0, min_value=1.0, step=1.0)
         with col2:
-            bonus_step_amount = st.number_input("Pay Extra ($)", value=200.0, step=50.0)
-        st.sidebar.caption(f"Calculated as: (${bonus_step_amount} per {bonus_step_count} extra {campaign_name.lower()})")
+            bonus_step_amount = st.number_input("Pay Extra (kes)", value=200.0, step=50.0)
+        st.sidebar.caption(f"Calculated as: (kes{bonus_step_amount} per {bonus_step_count} extra {campaign_name.lower()})")
 
     elif campaign_name == "Disbursements":
         col1, col2 = st.sidebar.columns(2)
         with col1:
             bonus_step_count = st.number_input("For every (X%)", value=1.0, min_value=0.1, step=0.5)
         with col2:
-            bonus_step_amount = st.number_input("Pay Extra ($)", value=200.0, step=50.0)
+            bonus_step_amount = st.number_input("Pay Extra (kes)", value=200.0, step=50.0)
 
     st.sidebar.divider()
     st.sidebar.write("### 🎯 Target Customization")
@@ -197,9 +197,9 @@ else:
                 st.divider()
                 st.subheader(f"Results Summary")
                 m1, m2, m3 = st.columns(3)
-                m1.metric("Total Payout", f"${staff_df['Staff_Payout_Amount'].sum():,.2f}")
+                m1.metric("Total Payout", f"kes{staff_df['Staff_Payout_Amount'].sum():,.2f}")
                 m2.metric("Eligible Staff", len(staff_df))
-                m3.metric("Avg. Bonus", f"${staff_df['Staff_Payout_Amount'].mean():,.2f}")
+                m3.metric("Avg. Bonus", f"kes{staff_df['Staff_Payout_Amount'].mean():,.2f}")
 
                 st.dataframe(staff_df, use_container_width=True)
                 
