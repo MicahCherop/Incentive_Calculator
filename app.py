@@ -4,7 +4,7 @@ import numpy as np
 
 # 1. Page Setup
 st.set_page_config(
-    page_title="UPIA Incentive Calculator", 
+    page_title="UPIA Incentive System", 
     page_icon="🏢", 
     layout="wide",
     initial_sidebar_state="expanded"
@@ -20,6 +20,7 @@ st.markdown("""
     [data-testid="stSidebar"] { min-width: 320px; }
     .block-container { padding-top: 2rem; }
     
+    /* Center the button vertically with the dropdown */
     div[data-testid="stColumn"] > div {
         display: flex;
         align-items: flex-end;
@@ -77,6 +78,7 @@ else:
 # --- ⚙️ CONFIGURATION PAGE ---
 if st.session_state.current_page == "admin":
     st.title("⚙️ System Configuration")
+    
     col_l, col_r = st.columns(2)
     
     with col_l:
@@ -105,31 +107,51 @@ if st.session_state.current_page == "admin":
                     st.rerun()
 
     st.divider()
+    
+    # --- 🗑️ MODIFIED DELETE SECTION (ONE ROW) ---
     st.subheader("🗑️ 3. Cleanup & Maintenance")
+    # Using specific column ratios to ensure single-row fit
     del_col_select, del_col_btn = st.columns([3, 1]) 
+    
     with del_col_select:
-        campaign_to_delete = st.selectbox("Select Campaign to Remove", [""] + list(st.session_state.campaign_configs.keys()), label_visibility="collapsed")
+        campaign_to_delete = st.selectbox(
+            "Select Campaign to Remove", 
+            [""] + list(st.session_state.campaign_configs.keys()),
+            label_visibility="collapsed" # Hides label to keep row slim
+        )
+    
     with del_col_btn:
         if st.button("🗑️ Delete Selected", type="secondary", use_container_width=True):
             if campaign_to_delete:
                 confirm_delete_dialog(campaign_to_delete)
+            else:
+                st.warning("Select first!")
 
 # --- 🏢 CALCULATOR PAGE ---
 else:
-    st.title("UPIA Incentive Calculator 🏢")
+    st.title("UPIA Incentive System 🏢")
     
+    # Selection
     st.sidebar.subheader("🎯 Context")
     eval_level = st.sidebar.selectbox("Level", list(st.session_state.levels.keys()))
     available_campaigns = [name for name, cfg in st.session_state.campaign_configs.items() if eval_level in cfg.get("applies_to", [])]
     
     if not available_campaigns:
-        st.sidebar.warning(f"No campaigns linked to {eval_level}")
+        st.sidebar.warning("No linked campaigns.")
         st.stop()
         
     campaign_name = st.sidebar.selectbox("Campaign", available_campaigns)
 
+    # Multiplier
+    scale_threshold = 1
+    if eval_level == "Assistant Sector Managers": 
+        scale_threshold = st.sidebar.number_input("Standard ASM Branches", value=4)
+    elif eval_level == "Sector Managers": 
+        scale_threshold = st.sidebar.number_input("Standard Sector Branches", value=25)
+
+    # Payout
     st.sidebar.divider()
-    st.sidebar.subheader("💵 Payout Settings")
+    st.sidebar.subheader("💵 Payout")
     base_bonus = st.sidebar.number_input("Base (kes)", value=3000.0)
     enable_extra = st.sidebar.checkbox("Extra Pay", value=True)
     bonus_step_count, bonus_step_amount = 2.0, 200.0
@@ -139,6 +161,7 @@ else:
         with c1: bonus_step_count = st.number_input("Per Qty/%", value=2.0)
         with c2: bonus_step_amount = st.number_input("Extra (kes)", value=200.0)
 
+    # Targets
     st.sidebar.divider()
     active_metrics = st.session_state.campaign_configs[campaign_name]["metrics"]
     targets, active_filters = {}, []
@@ -149,24 +172,14 @@ else:
             targets[metric] = st.sidebar.number_input(f"Min {metric}", value=val)
             active_filters.append(metric)
 
+    # Processing
     c1, c2 = st.columns(2)
-    perf_file = c1.file_uploader("1. Upload Performance CSV", type=['csv'])
-    staff_file = c2.file_uploader("2. Upload Staff CSV", type=['csv'])
+    perf_file = c1.file_uploader("Performance CSV", type=['csv'])
+    staff_file = c2.file_uploader("Staff CSV", type=['csv'])
 
     if perf_file:
         try:
-            raw_df = pd.read_csv(perf_file)
-            df = raw_df.loc[:, ~raw_df.columns.str.contains('^Unnamed')]
-            
-            if 'Pair_ID' not in df.columns:
-                st.error("❌ ensure the header is named Pair_ID.")
-                st.stop()
-            
-            if eval_level == "Pairs (LO & CO)":
-                if df['Pair_ID'].isnull().any() or (df['Pair_ID'].astype(str).str.strip() == "").any():
-                    st.error("❌ Null values detected! Please ensure all accounts are correctly paired.")
-                    st.stop()
-            
+            df = pd.read_csv(perf_file)
             all_cols = [m for sub in st.session_state.campaign_configs.values() for m in sub["metrics"]] + ["Disb_Target"]
             for col in set(all_cols):
                 if col in df.columns: df[col] = clean_numeric(df[col])
@@ -179,12 +192,11 @@ else:
                 agg_dict = {m: ('mean' if ("Pct" in m or "Actual" in m) else 'sum') for m in active_filters if m in df.columns}
                 if "Disb_Target" in df.columns: agg_dict["Disb_Target"] = "sum"
                 eval_df = df.groupby(group_key).agg(agg_dict).reset_index().merge(unit_counts, on=group_key)
-                eval_df['Multiplier'] = eval_df['Unit_Count'].astype(float) if eval_level == "Branch Managers" else 1.0
+                eval_df['Multiplier'] = eval_df['Unit_Count'].astype(float) if eval_level == "Branch Managers" else np.where(eval_df['Unit_Count'] > scale_threshold, eval_df['Unit_Count'] / scale_threshold, 1.0)
             else:
                 eval_df = df.copy()
                 eval_df['Multiplier'] = 1.0
 
-            # Calculation
             q = eval_df.copy()
             for f in active_filters:
                 if f == "Disb_Actual" and "Disb_Target" in q.columns:
@@ -203,42 +215,18 @@ else:
                 t_val = targets[primary] if ("Pct" in primary or "Actual" in primary) else (targets[primary] * q['Multiplier'])
                 q['Extra_Bonus'] = np.floor((achieved - t_val).clip(lower=0) / bonus_step_count) * bonus_step_amount
 
-            q['Pair_Payout'] = q['Base_Bonus'] + q['Extra_Bonus']
+            q['Total_Payout'] = q['Base_Bonus'] + q['Extra_Bonus']
 
             if staff_file:
-                raw_staff = pd.read_csv(staff_file, dtype={'Pair_ID': str})
-                s_dir = raw_staff.loc[:, ~raw_staff.columns.str.contains('^Unnamed')]
+                s_dir = pd.read_csv(staff_file, dtype={'Pair_ID': str})
                 m_key = group_key if group_key else "Pair_ID"
-                
-                # REVERTED: Split Pair Logic
-                if eval_level == "Pairs (LO & CO)":
-                    q = q.merge(s_dir[['Pair_ID', 'Loan_Officer', 'Collections_Officer']], on='Pair_ID', how='left')
-                    # Create two rows per pair
-                    q = q.melt(
-                        id_vars=[c for c in q.columns if c not in ['Loan_Officer', 'Collections_Officer']],
-                        value_vars=['Loan_Officer', 'Collections_Officer'],
-                        var_name='Role',
-                        value_name='Staff_Name'
-                    )
-                    # For Pairs, Individual Payout is the Pair Payout
-                    q['Individual_Payout'] = q['Pair_Payout']
-                else:
-                    q = q.merge(s_dir, on=m_key, how='left')
-                    q['Individual_Payout'] = q['Pair_Payout']
-            else:
-                q['Individual_Payout'] = q['Pair_Payout']
+                q = q.merge(s_dir, on=m_key, how='left')
 
             if not q.empty:
-                st.divider()
-                m1, m2 = st.columns(2)
-                m1.metric("Total Payout (KES)", f"{q['Individual_Payout'].sum():,.2f}")
-                m2.metric("Total Qualified Staff", len(q))
-                
-                st.subheader(f"Payout Report: {campaign_name}")
+                st.subheader(f"Results: {campaign_name}")
                 st.dataframe(q, use_container_width=True)
-                st.download_button("⬇️ Download CSV", q.to_csv(index=False), "Incentive_Report.csv", "text/csv")
+                st.download_button("Download CSV", q.to_csv(index=False), "Report.csv", "text/csv")
             else:
-                st.warning("No staff members qualified.")
-                
+                st.warning("No qualifiers.")
         except Exception as e:
             st.error(f"Error: {e}")
