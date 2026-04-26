@@ -19,12 +19,6 @@ st.markdown("""
     [data-testid="stHeader"] { background: rgba(0,0,0,0); } 
     [data-testid="stSidebar"] { min-width: 320px; }
     .block-container { padding-top: 2rem; }
-    
-    /* Center the button vertically with the dropdown */
-    div[data-testid="stColumn"] > div {
-        display: flex;
-        align-items: flex-end;
-    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -48,13 +42,13 @@ if "campaign_configs" not in st.session_state:
 if "current_page" not in st.session_state:
     st.session_state.current_page = "calculator"
 
-# --- 🛠️ DIALOGS ---
+# --- 🛠️ DIALOGS (Confirmations) ---
 @st.dialog("Confirm Deletion")
 def confirm_delete_dialog(campaign_name):
-    st.warning(f"Are you sure you want to delete **{campaign_name}**?")
-    if st.button("Yes, Delete", type="primary", use_container_width=True):
+    st.warning(f"Are you sure you want to delete the campaign: **{campaign_name}**? This cannot be undone.")
+    if st.button("Yes, Delete Campaign", type="primary", use_container_width=True):
         del st.session_state.campaign_configs[campaign_name]
-        st.toast(f"✅ Deleted {campaign_name}")
+        st.toast(f"✅ Campaign '{campaign_name}' deleted successfully!")
         st.rerun()
 
 # 3. Helper Functions
@@ -75,107 +69,120 @@ else:
         st.session_state.current_page = "calculator"
         st.rerun()
 
-# --- ⚙️ CONFIGURATION PAGE ---
+# --- ⚙️ CONFIGURATION PAGE (Admin) ---
 if st.session_state.current_page == "admin":
     st.title("⚙️ System Configuration")
     
     col_l, col_r = st.columns(2)
     
     with col_l:
-        st.subheader("🛠️ 1. Manage Levels")
+        st.subheader("🛠️ 1. Manage Evaluation Levels")
         with st.form("add_level_form", clear_on_submit=True):
-            lvl_name = st.text_input("Level Name")
-            lvl_group = st.text_input("Group Column")
-            lvl_unit = st.text_input("Unit Column")
-            if st.form_submit_button("Add Level"):
-                if lvl_name:
-                    st.session_state.levels[lvl_name] = {"group_key": lvl_group if lvl_group else None, "unit_name": lvl_unit}
-                    st.toast("✅ Level Added")
-                    st.rerun()
+            lvl_name = st.text_input("New Level Name", placeholder="e.g., Regional Manager")
+            lvl_group = st.text_input("Group Column in CSV", placeholder="e.g., Region")
+            lvl_unit = st.text_input("Counting Unit", placeholder="e.g., Branch")
+            submit_lvl = st.form_submit_button("Add Evaluation Level")
+            
+            if submit_lvl and lvl_name:
+                st.session_state.levels[lvl_name] = {"group_key": lvl_group if lvl_group else None, "unit_name": lvl_unit}
+                st.success(f"'{lvl_name}' added successfully!")
+                st.toast("✅ New Level Created")
 
     with col_r:
-        st.subheader("🚀 2. Create Campaigns")
+        st.subheader("🚀 2. Create/Link Campaigns")
         with st.form("add_campaign_form", clear_on_submit=True):
-            camp_name = st.text_input("Campaign Name")
+            camp_name = st.text_input("Campaign Name", placeholder="e.g., Q2 Recovery Drive")
+            
+            st.write("**Select Metrics:**")
             m_list = ["New_Customers", "Unique_Customers", "Active_Customers", "Active_No_Loans", "Dormant_Customers", "Amount_Collected", "OTC_Pct", "DD_Plus_7_Pct", "Overall_Collection_Pct", "Disb_Actual"]
-            selected_metrics = [m for m in m_list if st.checkbox(m, key=f"c_{m}")]
-            selected_lvls = [l for l in st.session_state.levels.keys() if st.checkbox(l, key=f"v_{l}")]
-            if st.form_submit_button("Save Campaign"):
+            selected_metrics = [m for m in m_list if st.checkbox(m, key=f"check_{m}")]
+            
+            st.write("**Link to Levels:**")
+            selected_lvls = [l for l in st.session_state.levels.keys() if st.checkbox(l, key=f"lvl_{l}")]
+            
+            submit_camp = st.form_submit_button("Save Campaign Mapping")
+            
+            if submit_camp:
                 if camp_name and selected_metrics and selected_lvls:
-                    st.session_state.campaign_configs[camp_name] = {"metrics": selected_metrics, "applies_to": selected_lvls}
+                    st.session_state.campaign_configs[camp_name] = {
+                        "metrics": selected_metrics,
+                        "applies_to": selected_lvls
+                    }
+                    st.success(f"Campaign '{camp_name}' added successfully!")
                     st.toast("✅ Campaign Linked")
                     st.rerun()
+                else:
+                    st.error("Please fill all campaign fields.")
 
     st.divider()
     
-    # --- 🗑️ MODIFIED DELETE SECTION (ONE ROW) ---
+    # --- 🗑️ DELETE SECTION ---
     st.subheader("🗑️ 3. Cleanup & Maintenance")
-    # Using specific column ratios to ensure single-row fit
-    del_col_select, del_col_btn = st.columns([3, 1]) 
-    
-    with del_col_select:
-        campaign_to_delete = st.selectbox(
-            "Select Campaign to Remove", 
-            [""] + list(st.session_state.campaign_configs.keys()),
-            label_visibility="collapsed" # Hides label to keep row slim
-        )
-    
-    with del_col_btn:
+    del_col1, del_col2 = st.columns([2, 1])
+    with del_col1:
+        campaign_to_delete = st.selectbox("Select a Campaign to Remove", [""] + list(st.session_state.campaign_configs.keys()))
+    with del_col2:
+        st.write("##") # Alignment
         if st.button("🗑️ Delete Selected", type="secondary", use_container_width=True):
-            if campaign_to_delete:
+            if campaign_to_delete != "":
                 confirm_delete_dialog(campaign_to_delete)
             else:
-                st.warning("Select first!")
+                st.warning("Please select a campaign first.")
 
 # --- 🏢 CALCULATOR PAGE ---
 else:
     st.title("UPIA Incentive System 🏢")
     
-    # Selection
+    # Selection Logic
     st.sidebar.subheader("🎯 Context")
-    eval_level = st.sidebar.selectbox("Level", list(st.session_state.levels.keys()))
+    eval_level = st.sidebar.selectbox("Evaluation Level", list(st.session_state.levels.keys()))
+    
     available_campaigns = [name for name, cfg in st.session_state.campaign_configs.items() if eval_level in cfg.get("applies_to", [])]
     
     if not available_campaigns:
-        st.sidebar.warning("No linked campaigns.")
+        st.sidebar.warning(f"No campaigns linked to {eval_level}")
         st.stop()
         
-    campaign_name = st.sidebar.selectbox("Campaign", available_campaigns)
+    campaign_name = st.sidebar.selectbox("Campaign Type", available_campaigns)
 
-    # Multiplier
+    # Multiplier Logic
     scale_threshold = 1
     if eval_level == "Assistant Sector Managers": 
-        scale_threshold = st.sidebar.number_input("Standard ASM Branches", value=4)
+        scale_threshold = st.sidebar.number_input("Standard ASM Branch Count", value=4)
     elif eval_level == "Sector Managers": 
-        scale_threshold = st.sidebar.number_input("Standard Sector Branches", value=25)
+        scale_threshold = st.sidebar.number_input("Standard Sector Branch Count", value=25)
 
-    # Payout
+    # Payout Settings
     st.sidebar.divider()
-    st.sidebar.subheader("💵 Payout")
-    base_bonus = st.sidebar.number_input("Base (kes)", value=3000.0)
-    enable_extra = st.sidebar.checkbox("Extra Pay", value=True)
-    bonus_step_count, bonus_step_amount = 2.0, 200.0
+    st.sidebar.subheader("💵 Payout Settings")
+    base_bonus = st.sidebar.number_input("Base Bonus (kes)", value=3000.0)
+    
+    enable_extra = st.sidebar.checkbox("Enable Extra/Incremental Pay", value=True)
+    bonus_step_count, bonus_step_amount = 1.0, 0.0
 
     if enable_extra:
         c1, c2 = st.sidebar.columns(2)
-        with c1: bonus_step_count = st.number_input("Per Qty/%", value=2.0)
+        with c1: bonus_step_count = st.number_input("Per Qty/%", value=2.0, min_value=0.1)
         with c2: bonus_step_amount = st.number_input("Extra (kes)", value=200.0)
 
-    # Targets
+    # Dynamic Target UI
     st.sidebar.divider()
+    st.sidebar.subheader("🎯 Target Thresholds")
     active_metrics = st.session_state.campaign_configs[campaign_name]["metrics"]
     targets, active_filters = {}, []
 
     for metric in active_metrics:
-        if st.sidebar.checkbox(f"Apply {metric}", value=True):
-            val = 90.0 if "Pct" in metric or "Actual" in metric else 6.0
-            targets[metric] = st.sidebar.number_input(f"Min {metric}", value=val)
+        if st.sidebar.checkbox(f"Apply {metric.replace('_',' ')}", value=True):
+            if "Pct" in metric or "Actual" in metric:
+                targets[metric] = st.sidebar.number_input(f"Min {metric} (%)", value=90.0)
+            else:
+                targets[metric] = st.sidebar.number_input(f"Min {metric}", value=6.0)
             active_filters.append(metric)
 
-    # Processing
+    # Data Processing
     c1, c2 = st.columns(2)
-    perf_file = c1.file_uploader("Performance CSV", type=['csv'])
-    staff_file = c2.file_uploader("Staff CSV", type=['csv'])
+    with c1: perf_file = st.file_uploader("Upload Performance CSV", type=['csv'])
+    with c2: staff_file = st.file_uploader("Upload Staff Directory CSV", type=['csv'])
 
     if perf_file:
         try:
@@ -191,6 +198,7 @@ else:
                 unit_counts = df.groupby(group_key)[unit_col].nunique().reset_index(name='Unit_Count')
                 agg_dict = {m: ('mean' if ("Pct" in m or "Actual" in m) else 'sum') for m in active_filters if m in df.columns}
                 if "Disb_Target" in df.columns: agg_dict["Disb_Target"] = "sum"
+                
                 eval_df = df.groupby(group_key).agg(agg_dict).reset_index().merge(unit_counts, on=group_key)
                 eval_df['Multiplier'] = eval_df['Unit_Count'].astype(float) if eval_level == "Branch Managers" else np.where(eval_df['Unit_Count'] > scale_threshold, eval_df['Unit_Count'] / scale_threshold, 1.0)
             else:
@@ -215,7 +223,7 @@ else:
                 t_val = targets[primary] if ("Pct" in primary or "Actual" in primary) else (targets[primary] * q['Multiplier'])
                 q['Extra_Bonus'] = np.floor((achieved - t_val).clip(lower=0) / bonus_step_count) * bonus_step_amount
 
-            q['Total_Payout'] = q['Base_Bonus'] + q['Extra_Bonus']
+            q['Final_Payout'] = q['Base_Bonus'] + q['Extra_Bonus']
 
             if staff_file:
                 s_dir = pd.read_csv(staff_file, dtype={'Pair_ID': str})
@@ -223,10 +231,11 @@ else:
                 q = q.merge(s_dir, on=m_key, how='left')
 
             if not q.empty:
-                st.subheader(f"Results: {campaign_name}")
+                st.divider()
+                st.subheader(f"Payout Report: {campaign_name}")
                 st.dataframe(q, use_container_width=True)
-                st.download_button("Download CSV", q.to_csv(index=False), "Report.csv", "text/csv")
+                st.download_button("Download Report", q.to_csv(index=False), "Report.csv", "text/csv")
             else:
-                st.warning("No qualifiers.")
+                st.warning("No staff met the criteria.")
         except Exception as e:
             st.error(f"Error: {e}")
