@@ -77,7 +77,6 @@ else:
 # --- ⚙️ CONFIGURATION PAGE ---
 if st.session_state.current_page == "admin":
     st.title("⚙️ System Configuration")
-    
     col_l, col_r = st.columns(2)
     
     with col_l:
@@ -102,7 +101,7 @@ if st.session_state.current_page == "admin":
             if st.form_submit_button("Save Campaign"):
                 if camp_name and selected_metrics and selected_lvls:
                     st.session_state.campaign_configs[camp_name] = {"metrics": selected_metrics, "applies_to": selected_lvls}
-                    st.toast("✅ Campaign Linked & Saved")
+                    st.toast("✅ Campaign Linked")
                     st.rerun()
 
     st.divider()
@@ -156,19 +155,13 @@ else:
 
     if perf_file:
         try:
-            # FORCE RELOAD DATA
             raw_df = pd.read_csv(perf_file)
-            
-            # --- 1. STRICT COLUMN CLEANUP ---
-            # Drop any column that starts with "Unnamed"
             df = raw_df.loc[:, ~raw_df.columns.str.contains('^Unnamed')]
             
-            # --- 2. HEADER VALIDATION ---
             if 'Pair_ID' not in df.columns:
                 st.error("❌ ensure the header is named Pair_ID.")
                 st.stop()
             
-            # --- 3. NULL CHECK FOR LO & CO ---
             if eval_level == "Pairs (LO & CO)":
                 if df['Pair_ID'].isnull().any() or (df['Pair_ID'].astype(str).str.strip() == "").any():
                     st.error("❌ Null values detected! Please ensure all accounts are correctly paired.")
@@ -185,14 +178,13 @@ else:
                 unit_counts = df.groupby(group_key)[unit_col].nunique().reset_index(name='Unit_Count')
                 agg_dict = {m: ('mean' if ("Pct" in m or "Actual" in m) else 'sum') for m in active_filters if m in df.columns}
                 if "Disb_Target" in df.columns: agg_dict["Disb_Target"] = "sum"
-                
                 eval_df = df.groupby(group_key).agg(agg_dict).reset_index().merge(unit_counts, on=group_key)
                 eval_df['Multiplier'] = eval_df['Unit_Count'].astype(float) if eval_level == "Branch Managers" else 1.0
             else:
                 eval_df = df.copy()
                 eval_df['Multiplier'] = 1.0
 
-            # --- 4. CALCULATION ENGINE ---
+            # Calculation
             q = eval_df.copy()
             for f in active_filters:
                 if f == "Disb_Actual" and "Disb_Target" in q.columns:
@@ -211,27 +203,42 @@ else:
                 t_val = targets[primary] if ("Pct" in primary or "Actual" in primary) else (targets[primary] * q['Multiplier'])
                 q['Extra_Bonus'] = np.floor((achieved - t_val).clip(lower=0) / bonus_step_count) * bonus_step_amount
 
-            q['Total_Payout'] = q['Base_Bonus'] + q['Extra_Bonus']
+            q['Pair_Payout'] = q['Base_Bonus'] + q['Extra_Bonus']
 
             if staff_file:
                 raw_staff = pd.read_csv(staff_file, dtype={'Pair_ID': str})
                 s_dir = raw_staff.loc[:, ~raw_staff.columns.str.contains('^Unnamed')]
                 m_key = group_key if group_key else "Pair_ID"
-                q = q.merge(s_dir, on=m_key, how='left')
+                
+                # REVERTED: Split Pair Logic
+                if eval_level == "Pairs (LO & CO)":
+                    q = q.merge(s_dir[['Pair_ID', 'Loan_Officer', 'Collections_Officer']], on='Pair_ID', how='left')
+                    # Create two rows per pair
+                    q = q.melt(
+                        id_vars=[c for c in q.columns if c not in ['Loan_Officer', 'Collections_Officer']],
+                        value_vars=['Loan_Officer', 'Collections_Officer'],
+                        var_name='Role',
+                        value_name='Staff_Name'
+                    )
+                    # For Pairs, Individual Payout is the Pair Payout
+                    q['Individual_Payout'] = q['Pair_Payout']
+                else:
+                    q = q.merge(s_dir, on=m_key, how='left')
+                    q['Individual_Payout'] = q['Pair_Payout']
+            else:
+                q['Individual_Payout'] = q['Pair_Payout']
 
-            # --- 5. REVERTED SUMMATION METRICS ---
             if not q.empty:
                 st.divider()
-                # Displays the totals clearly above the dataframe
                 m1, m2 = st.columns(2)
-                m1.metric("Total Payout (KES)", f"{q['Total_Payout'].sum():,.2f}")
+                m1.metric("Total Payout (KES)", f"{q['Individual_Payout'].sum():,.2f}")
                 m2.metric("Total Qualified Staff", len(q))
                 
-                st.subheader(f"Payout Data: {campaign_name}")
+                st.subheader(f"Payout Report: {campaign_name}")
                 st.dataframe(q, use_container_width=True)
                 st.download_button("⬇️ Download CSV", q.to_csv(index=False), "Incentive_Report.csv", "text/csv")
             else:
-                st.warning("No staff members met the qualification thresholds.")
+                st.warning("No staff members qualified.")
                 
         except Exception as e:
-            st.error(f"Critical Error: {e}")
+            st.error(f"Error: {e}")
