@@ -4,7 +4,7 @@ import numpy as np
 
 # 1. Page Setup
 st.set_page_config(
-    page_title="UPIA Incentive Calculator", 
+    page_title="UPIA Incentive System", 
     page_icon="🏢", 
     layout="wide",
     initial_sidebar_state="expanded"
@@ -24,8 +24,7 @@ st.markdown("""
 
 # 2. Optimized Helper Functions
 @st.cache_data
-def load_and_process_data(file):
-    """Caches data loading to prevent redundant processing on UI changes."""
+def process_performance_data(file):
     df = pd.read_csv(file)
     num_cols = ['New_Customers', 'Unique_Customers', 'Active_Customers', 'Dormant_Customers', 
                 'Amount_Collected', 'DD_Plus_7_Pct', 'OTC_Pct', 'Overall_Collection_Pct', 
@@ -39,7 +38,7 @@ def load_and_process_data(file):
     return df
 
 # 3. Main Interface
-st.title("UPIA Incentive Calculator 🏢")
+st.title("UPIA Incentive System 🏢")
 
 LEVEL_CONFIG = {
     "Pairs (LO & CO)": {"group_key": None, "unit_name": "Pair"},
@@ -90,24 +89,19 @@ if "Customers" in campaign_name:
     key = campaign_name.replace(" ", "_")
     targets[key] = st.sidebar.number_input(f"Base Min {campaign_name} Required", value=6.0)
     active_filters.append(key)
-
 elif campaign_name == "Collections":
     if st.sidebar.checkbox("Filter by Amount Collected", value=True):
         targets["Amount_Collected"] = st.sidebar.number_input("Min Amount", value=50000.0)
         active_filters.append("Amount_Collected")
-    
     if st.sidebar.checkbox("Filter by OTC %", value=True):
         targets["OTC_Pct"] = st.sidebar.number_input("Min OTC (%)", value=91.0)
         active_filters.append("OTC_Pct")
-        
     if st.sidebar.checkbox("Filter by DD+7 %", value=True):
         targets["DD_Plus_7_Pct"] = st.sidebar.number_input("Min DD+7 (%)", value=94.0)
         active_filters.append("DD_Plus_7_Pct")
-
     if st.sidebar.checkbox("Filter by Overall Collection %", value=False):
         targets["Overall_Collection_Pct"] = st.sidebar.number_input("Min Overall Collection (%)", value=95.0)
         active_filters.append("Overall_Collection_Pct")
-        
 elif campaign_name == "Disbursements":
     targets["disb_threshold"] = st.sidebar.number_input("Qualification Threshold (%)", value=100.0)
     active_filters.append("disb_threshold")
@@ -120,7 +114,7 @@ with c2: staff_file = st.file_uploader("2. Upload Staff Directory CSV", type=['c
 
 if perf_file:
     try:
-        df = load_and_process_data(perf_file)
+        df = process_performance_data(perf_file)
         
         # --- 🛡️ Null Pair Validation ---
         if 'Pair_ID' in df.columns:
@@ -148,6 +142,10 @@ if perf_file:
         for filter_key in active_filters:
             if filter_key in ["OTC_Pct", "DD_Plus_7_Pct", "Overall_Collection_Pct"]:
                 q = q[q[filter_key] >= targets[filter_key]]
+            elif filter_key == "disb_threshold":
+                # Calculate achievement on the fly
+                q['Disb_Achievement_Pct'] = np.where(q['Disb_Target'] > 0, (q['Disb_Actual'] / q['Disb_Target'] * 100), 0)
+                q = q[q['Disb_Achievement_Pct'] >= targets[filter_key]]
             else:
                 q = q[q[filter_key] >= (targets[filter_key] * m)]
 
@@ -156,9 +154,9 @@ if perf_file:
             q['Extra_Achieved'] = (q[col] - (targets[col] * m)).clip(lower=0)
             q['Extra_Bonus_Value'] = np.floor(q['Extra_Achieved'] / bonus_step_count) * bonus_step_amount
         elif campaign_name == "Disbursements":
-            # Safe division to prevent inf values
-            q['Disb_Achievement_Pct'] = np.where(q['Disb_Target'] > 0, (q['Disb_Actual'] / q['Disb_Target'] * 100), 0)
-            q = q[q['Disb_Achievement_Pct'] >= targets["disb_threshold"]]
+            # Ensure Pct exists if filter wasn't run
+            if 'Disb_Achievement_Pct' not in q.columns:
+                q['Disb_Achievement_Pct'] = np.where(q['Disb_Target'] > 0, (q['Disb_Actual'] / q['Disb_Target'] * 100), 0)
             q['Pct_Above_Threshold'] = (q['Disb_Achievement_Pct'] - targets["disb_threshold"]).clip(lower=0)
             q['Extra_Bonus_Value'] = np.floor(q['Pct_Above_Threshold'] / bonus_step_count) * bonus_step_amount
         else:
@@ -179,7 +177,6 @@ if perf_file:
         if staff_file:
             s_dir = pd.read_csv(staff_file, dtype={'Phone_Number': str, 'Pair_ID': str})
             staff_df = staff_df.merge(s_dir.drop_duplicates(m_keys), on=m_keys, how='left')
-            # Fill missing directory info
             if 'Staff_Name' in staff_df.columns:
                 staff_df['Staff_Name'] = staff_df['Staff_Name'].fillna('Unknown Staff')
 
@@ -191,7 +188,6 @@ if perf_file:
             m2.metric("Qualifying Staff", len(staff_df))
             m3.metric("Avg. Bonus", f"KES{staff_df['Staff_Payout_Amount'].mean():,.2f}")
             
-            # Use column config for tighter headers
             st.dataframe(
                 staff_df, 
                 use_container_width=True,
@@ -204,4 +200,4 @@ if perf_file:
             st.warning("No staff members qualified with the selected criteria.")
 
     except Exception as e:
-        st.error(f"Error: {e}")
+        st.error(f"Error processing calculation: {e}")
