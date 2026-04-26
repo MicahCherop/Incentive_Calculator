@@ -17,13 +17,45 @@ st.markdown("""
     footer {visibility: hidden;}
     .stAppDeployButton {display:none;}
     [data-testid="stHeader"] { background: rgba(0,0,0,0); } 
-    [data-testid="stSidebar"] { min-width: 300px; max-width: 300px; }
+    [data-testid="stSidebar"] { min-width: 320px; }
     .block-container { padding-top: 2rem; }
+    
+    /* Center the button vertically with the dropdown */
+    div[data-testid="stColumn"] > div {
+        display: flex;
+        align-items: flex-end;
+    }
     </style>
     """, unsafe_allow_html=True)
 
+# 2. Session State Initialization
+if "levels" not in st.session_state:
+    st.session_state.levels = {
+        "Pairs (LO & CO)": {"group_key": None, "unit_name": "Pair"},
+        "Branch Managers": {"group_key": "Branch", "unit_name": "Pair_ID"},
+        "Assistant Sector Managers": {"group_key": "Subsector", "unit_name": "Branch"},
+        "Sector Managers": {"group_key": "Sector", "unit_name": "Branch"}
+    }
+
+if "campaign_configs" not in st.session_state:
+    all_lvls = list(st.session_state.levels.keys())
+    st.session_state.campaign_configs = {
+        "New Customers": {"metrics": ["New_Customers"], "applies_to": all_lvls},
+        "Collections": {"metrics": ["Amount_Collected", "OTC_Pct", "DD_Plus_7_Pct", "Overall_Collection_Pct"], "applies_to": all_lvls},
+        "Disbursements": {"metrics": ["Disb_Actual"], "applies_to": ["Pairs (LO & CO)", "Branch Managers"]}
+    }
+
 if "current_page" not in st.session_state:
     st.session_state.current_page = "calculator"
+
+# --- 🛠️ DIALOGS ---
+@st.dialog("Confirm Deletion")
+def confirm_delete_dialog(campaign_name):
+    st.warning(f"Are you sure you want to delete **{campaign_name}**?")
+    if st.button("Yes, Delete", type="primary", use_container_width=True):
+        del st.session_state.campaign_configs[campaign_name]
+        st.toast(f"✅ Deleted {campaign_name}")
+        st.rerun()
 
 # 3. Helper Functions
 def clean_numeric(series):
@@ -35,7 +67,7 @@ def clean_numeric(series):
 # 4. Navigation
 st.sidebar.title("Navigation")
 if st.session_state.current_page == "calculator":
-    if st.sidebar.button("⚙️ Open Admin Dashboard", use_container_width=True):
+    if st.sidebar.button("⚙️ System Configuration", use_container_width=True):
         st.session_state.current_page = "admin"
         st.rerun()
 else:
@@ -43,186 +75,166 @@ else:
         st.session_state.current_page = "calculator"
         st.rerun()
 
-st.sidebar.divider()
-
+# --- ⚙️ CONFIGURATION PAGE ---
 if st.session_state.current_page == "admin":
-    st.title("⚙️ User Management Dashboard")
-    col1, col2 = st.columns(2)
-    with col1:
-        new_role = st.selectbox("User Role", ["UPIA OpsAdmin", "Finance Officer"])
-        new_user = st.text_input("Username")
-    with col2:
-        new_pass = st.text_input("Password", type="password")
+    st.title("⚙️ System Configuration")
     
-    if st.button("Generate Secure Access Code", type="primary"):
-        if new_user and new_pass:
-            st.success("✅ Code generated!")
-            st.code(f'# {new_role}\n{new_user} = "{new_pass}"', language="toml")
+    col_l, col_r = st.columns(2)
+    
+    with col_l:
+        st.subheader("🛠️ 1. Manage Levels")
+        with st.form("add_level_form", clear_on_submit=True):
+            lvl_name = st.text_input("Level Name")
+            lvl_group = st.text_input("Group Column")
+            lvl_unit = st.text_input("Unit Column")
+            if st.form_submit_button("Add Level"):
+                if lvl_name:
+                    st.session_state.levels[lvl_name] = {"group_key": lvl_group if lvl_group else None, "unit_name": lvl_unit}
+                    st.toast("✅ Level Added")
+                    st.rerun()
 
+    with col_r:
+        st.subheader("🚀 2. Create Campaigns")
+        with st.form("add_campaign_form", clear_on_submit=True):
+            camp_name = st.text_input("Campaign Name")
+            m_list = ["New_Customers", "Unique_Customers", "Active_Customers", "Active_No_Loans", "Dormant_Customers", "Amount_Collected", "OTC_Pct", "DD_Plus_7_Pct", "Overall_Collection_Pct", "Disb_Actual"]
+            selected_metrics = [m for m in m_list if st.checkbox(m, key=f"c_{m}")]
+            selected_lvls = [l for l in st.session_state.levels.keys() if st.checkbox(l, key=f"v_{l}")]
+            if st.form_submit_button("Save Campaign"):
+                if camp_name and selected_metrics and selected_lvls:
+                    st.session_state.campaign_configs[camp_name] = {"metrics": selected_metrics, "applies_to": selected_lvls}
+                    st.toast("✅ Campaign Linked & Saved")
+                    st.rerun()
+
+    st.divider()
+    
+    st.subheader("🗑️ 3. Cleanup & Maintenance")
+    del_col_select, del_col_btn = st.columns([3, 1]) 
+    
+    with del_col_select:
+        campaign_to_delete = st.selectbox(
+            "Select Campaign to Remove", 
+            [""] + list(st.session_state.campaign_configs.keys()),
+            label_visibility="collapsed"
+        )
+    
+    with del_col_btn:
+        if st.button("🗑️ Delete Selected", type="secondary", use_container_width=True):
+            if campaign_to_delete:
+                confirm_delete_dialog(campaign_to_delete)
+            else:
+                st.warning("Select a campaign first!")
+
+# --- 🏢 CALCULATOR PAGE ---
 else:
     st.title("UPIA Incentive System 🏢")
     
-    LEVEL_CONFIG = {
-        "Pairs (LO & CO)": {"group_key": None, "unit_name": "Pair"},
-        "Branch Managers": {"group_key": "Branch", "unit_name": "Pair_ID"},
-        "Assistant Sector Managers": {"group_key": "Subsector", "unit_name": "Branch"},
-        "Sector Managers": {"group_key": "Sector", "unit_name": "Branch"}
-    }
-
-    st.sidebar.title("Configuration")
-    eval_level = st.sidebar.selectbox("1. Select Evaluation Level", list(LEVEL_CONFIG.keys()))
-    campaign_name = st.sidebar.selectbox("2. Select Campaign", ["New Customers", "Unique Customers", "Active Customers", "Dormant Customers", "Collections", "Disbursements"])
-
-    st.sidebar.divider() 
+    # Selection
+    st.sidebar.subheader("🎯 Context")
+    eval_level = st.sidebar.selectbox("Level", list(st.session_state.levels.keys()))
+    available_campaigns = [name for name, cfg in st.session_state.campaign_configs.items() if eval_level in cfg.get("applies_to", [])]
     
-    # Scaling Logic
+    if not available_campaigns:
+        st.sidebar.warning(f"No campaigns linked to {eval_level}")
+        st.stop()
+        
+    campaign_name = st.sidebar.selectbox("Campaign", available_campaigns)
+
+    # Multiplier
     scale_threshold = 1
     if eval_level == "Assistant Sector Managers": 
-        scale_threshold = st.sidebar.number_input("Standard ASM Branch Count", value=4)
+        scale_threshold = st.sidebar.number_input("Standard ASM Branches", value=4)
     elif eval_level == "Sector Managers": 
-        scale_threshold = st.sidebar.number_input("Standard Sector Branch Count", value=25)
+        scale_threshold = st.sidebar.number_input("Standard Sector Branches", value=25)
 
-    st.sidebar.write("### 💵 Payout Settings")
-    base_bonus = st.sidebar.number_input("Base Bonus Amount", value=3000.0, step=500.0)
-    
-    bonus_step_count = 1.0
-    bonus_step_amount = 0.0
-
-    if "Customers" in campaign_name:
-        col1, col2 = st.sidebar.columns(2)
-        with col1:
-            bonus_step_count = st.number_input("For every (Qty)", value=2.0, min_value=1.0, step=1.0)
-        with col2:
-            bonus_step_amount = st.number_input("Pay Extra (kes)", value=200.0, step=50.0)
-    elif campaign_name == "Disbursements":
-        col1, col2 = st.sidebar.columns(2)
-        with col1:
-            bonus_step_count = st.number_input("For every (X%)", value=1.0, min_value=0.1, step=0.5)
-        with col2:
-            bonus_step_amount = st.number_input("Pay Extra (kes)", value=200.0, step=50.0)
-
+    # Payout
     st.sidebar.divider()
-    st.sidebar.write("### 🎯 Target Customization")
-    
-    targets = {}
-    active_filters = []
+    st.sidebar.subheader("💵 Payout")
+    base_bonus = st.sidebar.number_input("Base (kes)", value=3000.0)
+    enable_extra = st.sidebar.checkbox("Extra Pay", value=True)
+    bonus_step_count, bonus_step_amount = 2.0, 200.0
 
-    if "Customers" in campaign_name:
-        key = campaign_name.replace(" ", "_")
-        targets[key] = st.sidebar.number_input(f"Base Min {campaign_name} Required", value=6.0)
-        active_filters.append(key)
-    
-    elif campaign_name == "Collections":
-        # Checkboxes for flexible criteria
-        use_amt = st.sidebar.checkbox("Filter by Amount Collected", value=True)
-        if use_amt:
-            targets["Amount_Collected"] = st.sidebar.number_input("Min Amount", value=50000.0)
-            active_filters.append("Amount_Collected")
-        
-        use_otc = st.sidebar.checkbox("Filter by OTC %", value=True)
-        if use_otc:
-            targets["OTC_Pct"] = st.sidebar.number_input("Min OTC (%)", value=91.0)
-            active_filters.append("OTC_Pct")
-            
-        use_dd7 = st.sidebar.checkbox("Filter by DD+7 %", value=True)
-        if use_dd7:
-            targets["DD_Plus_7_Pct"] = st.sidebar.number_input("Min DD+7 (%)", value=94.0)
-            active_filters.append("DD_Plus_7_Pct")
+    if enable_extra:
+        c1, c2 = st.sidebar.columns(2)
+        with c1: bonus_step_count = st.number_input("Per Qty/%", value=2.0)
+        with c2: bonus_step_amount = st.number_input("Extra (kes)", value=200.0)
 
-        use_overall = st.sidebar.checkbox("Filter by Overall Collection %", value=False)
-        if use_overall:
-            targets["Overall_Collection_Pct"] = st.sidebar.number_input("Min Overall Collection (%)", value=95.0)
-            active_filters.append("Overall_Collection_Pct")
-            
-    elif campaign_name == "Disbursements":
-        targets["disb_threshold"] = st.sidebar.number_input("Qualification Threshold (%)", value=100.0)
-        active_filters.append("disb_threshold")
+    # Targets
+    st.sidebar.divider()
+    active_metrics = st.session_state.campaign_configs[campaign_name]["metrics"]
+    targets, active_filters = {}, []
 
-    # File Uploaders
-    st.write(f"**Level:** {eval_level} | **Campaign:** {campaign_name}")
+    for metric in active_metrics:
+        if st.sidebar.checkbox(f"Apply {metric}", value=True):
+            val = 90.0 if "Pct" in metric or "Actual" in metric else 6.0
+            targets[metric] = st.sidebar.number_input(f"Min {metric}", value=val)
+            active_filters.append(metric)
+
+    # Processing
     c1, c2 = st.columns(2)
-    with c1: perf_file = st.file_uploader("1. Upload Performance CSV", type=['csv'])
-    with c2: staff_file = st.file_uploader("2. Upload Staff Directory CSV", type=['csv'])
+    perf_file = c1.file_uploader("1. Upload Performance CSV", type=['csv'])
+    staff_file = c2.file_uploader("2. Upload Staff CSV", type=['csv'])
 
     if perf_file:
         try:
             df = pd.read_csv(perf_file)
-            # Added Overall_Collection_Pct to clean list
-            num_cols = ['New_Customers', 'Unique_Customers', 'Active_Customers', 'Dormant_Customers', 
-                        'Amount_Collected', 'DD_Plus_7_Pct', 'OTC_Pct', 'Overall_Collection_Pct', 
-                        'Disb_Target', 'Disb_Actual']
-            for col in num_cols:
-                if col in df.columns:
-                    df[col] = clean_numeric(df[col])
             
-            group_key = LEVEL_CONFIG[eval_level]["group_key"]
-            unit_col = LEVEL_CONFIG[eval_level]["unit_name"]
+            # --- LO & CO Null Validation ---
+            if eval_level == "Pairs (LO & CO)":
+                if 'Pair_ID' in df.columns:
+                    if df['Pair_ID'].isnull().any() or (df['Pair_ID'].astype(str).str.strip() == "").any():
+                        st.error("❌ Null values detected! Please ensure all accounts are correctly paired.")
+                        st.stop()
             
-            if group_key:
+            all_cols = [m for sub in st.session_state.campaign_configs.values() for m in sub["metrics"]] + ["Disb_Target"]
+            for col in set(all_cols):
+                if col in df.columns: df[col] = clean_numeric(df[col])
+            
+            lvl_cfg = st.session_state.levels[eval_level]
+            group_key, unit_col = lvl_cfg["group_key"], lvl_cfg["unit_name"]
+            
+            if group_key and group_key in df.columns:
                 unit_counts = df.groupby(group_key)[unit_col].nunique().reset_index(name='Unit_Count')
-                agg_dict = {c: 'sum' for c in ['New_Customers', 'Unique_Customers', 'Active_Customers', 'Dormant_Customers', 'Amount_Collected', 'Disb_Target', 'Disb_Actual'] if c in df.columns}
-                # Added Overall_Collection_Pct to mean aggregation
-                agg_dict.update({c: 'mean' for c in ['DD_Plus_7_Pct', 'OTC_Pct', 'Overall_Collection_Pct'] if c in df.columns})
+                agg_dict = {m: ('mean' if ("Pct" in m or "Actual" in m) else 'sum') for m in active_filters if m in df.columns}
+                if "Disb_Target" in df.columns: agg_dict["Disb_Target"] = "sum"
+                
                 eval_df = df.groupby(group_key).agg(agg_dict).reset_index().merge(unit_counts, on=group_key)
                 eval_df['Multiplier'] = eval_df['Unit_Count'].astype(float) if eval_level == "Branch Managers" else np.where(eval_df['Unit_Count'] > scale_threshold, eval_df['Unit_Count'] / scale_threshold, 1.0)
             else:
                 eval_df = df.copy()
                 eval_df['Multiplier'] = 1.0
 
-            # --- Calculation Engine ---
             q = eval_df.copy()
-            m = q['Multiplier']
-            
-            # Apply active filters dynamically
-            for filter_key in active_filters:
-                if filter_key == "Amount_Collected":
-                    q = q[q[filter_key] >= (targets[filter_key] * m)]
-                elif filter_key in ["OTC_Pct", "DD_Plus_7_Pct", "Overall_Collection_Pct"]:
-                    q = q[q[filter_key] >= targets[filter_key]]
-                elif "Customers" in campaign_name:
-                    q = q[q[filter_key] >= (targets[filter_key] * m)]
-
-            # Calculate Extra Bonuses
-            if "Customers" in campaign_name:
-                col = campaign_name.replace(" ", "_")
-                q['Extra_Achieved'] = (q[col] - (targets[col] * m)).clip(lower=0)
-                q['Extra_Bonus_Value'] = np.floor(q['Extra_Achieved'] / bonus_step_count) * bonus_step_amount
-            elif campaign_name == "Disbursements":
-                q['Disb_Achievement_Pct'] = (q['Disb_Actual'] / q['Disb_Target'] * 100).fillna(0)
-                q = q[q['Disb_Achievement_Pct'] >= targets["disb_threshold"]]
-                q['Pct_Above_Threshold'] = (q['Disb_Achievement_Pct'] - targets["disb_threshold"]).clip(lower=0)
-                q['Extra_Bonus_Value'] = np.floor(q['Pct_Above_Threshold'] / bonus_step_count) * bonus_step_amount
-            else:
-                q['Extra_Bonus_Value'] = 0.0
+            for f in active_filters:
+                if f == "Disb_Actual" and "Disb_Target" in q.columns:
+                    q['Disb_Achievement_Pct'] = (q['Disb_Actual'] / q['Disb_Target'] * 100).fillna(0)
+                    q = q[q['Disb_Achievement_Pct'] >= targets[f]]
+                elif "Pct" in f or "Actual" in f:
+                    q = q[q[f] >= targets[f]]
+                else:
+                    q = q[q[f] >= (targets[f] * q['Multiplier'])]
 
             q['Base_Bonus'] = base_bonus
-            q['Staff_Payout_Amount'] = q['Base_Bonus'] + q['Extra_Bonus_Value']
+            q['Extra_Bonus'] = 0.0
+            if enable_extra and not q.empty and active_filters:
+                primary = active_filters[0]
+                achieved = q['Disb_Achievement_Pct'] if primary == "Disb_Actual" and "Disb_Achievement_Pct" in q.columns else q[primary]
+                t_val = targets[primary] if ("Pct" in primary or "Actual" in primary) else (targets[primary] * q['Multiplier'])
+                q['Extra_Bonus'] = np.floor((achieved - t_val).clip(lower=0) / bonus_step_count) * bonus_step_amount
 
-            # Staff Mapping
-            if eval_level == "Pairs (LO & CO)":
-                q['Role'] = [['Loan Officer', 'Collections Officer'] for _ in range(len(q))]
-                staff_df = q.explode('Role')
-                m_keys = ['Branch', 'Pair_ID', 'Role']
-            else:
-                staff_df = q.assign(Role=eval_level.rstrip('s'))
-                m_keys = [group_key, 'Role']
+            q['Total_Payout'] = q['Base_Bonus'] + q['Extra_Bonus']
 
             if staff_file:
-                s_dir = pd.read_csv(staff_file, dtype={'Phone_Number': str, 'Pair_ID': str})
-                staff_df = staff_df.merge(s_dir.drop_duplicates(m_keys), on=m_keys, how='left')
+                s_dir = pd.read_csv(staff_file, dtype={'Pair_ID': str})
+                m_key = group_key if group_key else "Pair_ID"
+                q = q.merge(s_dir, on=m_key, how='left')
 
-            # --- Final Display ---
-            if not staff_df.empty:
+            if not q.empty:
                 st.divider()
-                m1, m2, m3 = st.columns(3)
-                m1.metric("Total Payout", f"kes {staff_df['Staff_Payout_Amount'].sum():,.2f}")
-                m2.metric("Qualifying Staff", len(staff_df))
-                m3.metric("Avg. Bonus", f"kes {staff_df['Staff_Payout_Amount'].mean():,.2f}")
-                st.dataframe(staff_df, use_container_width=True)
-                csv = staff_df.to_csv(index=False).encode('utf-8')
-                st.download_button("⬇️ Download Final Report", data=csv, file_name=f'Collections_Report.csv', mime='text/csv', type="primary")
+                st.subheader(f"Calculation Results: {campaign_name}")
+                st.dataframe(q, use_container_width=True)
+                st.download_button("⬇️ Download Report", q.to_csv(index=False), f"Payout_{campaign_name}.csv", "text/csv")
             else:
-                st.warning("No staff members qualified with the selected criteria.")
-
+                st.warning("No staff members qualified based on the current targets.")
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"Processing Error: {e}")
