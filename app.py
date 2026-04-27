@@ -233,7 +233,7 @@ if perf_file and target_file:
                     missing_entities = missing_targets[merge_keys[0]].astype(str)
                 
                 missing_str = ", ".join(missing_entities.tolist())
-                st.warning(f"⚠️ **Missing targets for {len(missing_targets)} entities:**\n\n{missing_str}\n\n*These entities will be evaluated against a target of 0. Check your Target CSV to ensure they exist.*")
+                st.warning(f"⚠️ **Missing targets for {len(missing_targets)} entities:**\n\n{missing_str}\n\n*These Branches will be evaluated against a target of 0. Check your Target CSV to ensure they exist.*")
 
         # --- Calculation Engine ---
         q = eval_df.copy()
