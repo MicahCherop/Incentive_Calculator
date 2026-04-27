@@ -22,29 +22,74 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
+# --- 🛡️ NEW: ROBUST STRING CLEANER ---
+def standardize_merge_keys(df):
+    """Aggressively cleans merge keys to prevent disqualification due to typos, spaces, or case mismatches."""
+    # Clean Locations & Roles (Title Case)
+    for col in ['Branch', 'Subsector', 'Sector', 'Role']:
+        if col in df.columns:
+            df[col] = df[col].astype(str).str.strip().str.title()
+            df[col] = df[col].str.replace(r'\s+', ' ', regex=True) # Remove double spaces
+            df[col] = df[col].replace({'Nan': np.nan, 'None': np.nan})
+            
+    # Clean Pair IDs (Upper Case + Fix Float strings like "1.0" -> "1")
+    if 'Pair_ID' in df.columns:
+        df['Pair_ID'] = df['Pair_ID'].astype(str).str.strip().str.upper()
+        df['Pair_ID'] = df['Pair_ID'].str.replace(r'\s+', ' ', regex=True)
+        df['Pair_ID'] = df['Pair_ID'].str.replace(r'\.0$', '', regex=True) 
+        df['Pair_ID'] = df['Pair_ID'].replace({'NAN': np.nan, 'NONE': np.nan})
+        
+    return df
+
 # 2. Optimized Helper Functions
 @st.cache_data
 def process_performance_data(file):
     df = pd.read_csv(file)
+    df.columns = [str(c).strip().replace(' ', '_') for c in df.columns]
+    df = df.loc[:, ~df.columns.str.contains('^Unnamed', case=False, na=False)]
+    
     num_cols = ['New_Customers', 'Unique_Customers', 'Active_Customers', 'Dormant_Customers', 
                 'Amount_Collected', 'DD_Plus_7_Pct', 'OTC_Pct', 'Overall_Collection_Pct', 
-                'Disb_Target', 'Disb_Actual']
+                'Disb_Actual']
     for col in num_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(
                 df[col].astype(str).replace(r'[^-0-9.]', '', regex=True), 
                 errors='coerce'
             ).fillna(0)
-    return df
+            
+    return standardize_merge_keys(df)
+
+@st.cache_data
+def load_targets_data(file):
+    df = pd.read_csv(file)
+    df.columns = [str(c).strip().replace(' ', '_') for c in df.columns]
+    df = df.loc[:, ~df.columns.str.contains('^Unnamed', case=False, na=False)]
+    
+    for col in df.columns:
+        if col not in ['Pair_ID', 'Branch', 'Subsector', 'Sector']:
+            df[col] = pd.to_numeric(
+                df[col].astype(str).replace(r'[^-0-9.]', '', regex=True), 
+                errors='coerce'
+            ).fillna(0)
+            
+    return standardize_merge_keys(df)
+
+@st.cache_data
+def load_staff_directory(file):
+    df = pd.read_csv(file, dtype={'Phone_Number': str, 'Pair_ID': str})
+    df.columns = [str(c).strip().replace(' ', '_') for c in df.columns]
+    df = df.loc[:, ~df.columns.str.contains('^Unnamed', case=False, na=False)]
+    return standardize_merge_keys(df)
 
 # 3. Main Interface
 st.title("UPIA Incentive System 🏢")
 
 LEVEL_CONFIG = {
-    "Pairs (LO & CO)": {"group_key": None, "unit_name": "Pair"},
-    "Branch Managers": {"group_key": "Branch", "unit_name": "Pair_ID"},
-    "Assistant Sector Managers": {"group_key": "Subsector", "unit_name": "Branch"},
-    "Sector Managers": {"group_key": "Sector", "unit_name": "Branch"}
+    "Pairs (LO & CO)": {"group_key": ["Branch", "Pair_ID"], "unit_name": "Pair_ID", "match_key": "Pair_ID"},
+    "Branch Managers": {"group_key": "Branch", "unit_name": "Pair_ID", "match_key": "Branch"},
+    "Assistant Sector Managers": {"group_key": "Subsector", "unit_name": "Branch", "match_key": "Subsector"},
+    "Sector Managers": {"group_key": "Sector", "unit_name": "Branch", "match_key": "Sector"}
 }
 
 st.sidebar.title("Configuration")
@@ -108,32 +153,68 @@ elif campaign_name == "Disbursements":
 
 # File Uploaders
 st.write(f"**Level:** {eval_level} | **Campaign:** {campaign_name}")
-c1, c2 = st.columns(2)
-with c1: perf_file = st.file_uploader("1. Upload Performance CSV", type=['csv'])
-with c2: staff_file = st.file_uploader("2. Upload Staff Directory CSV", type=['csv'])
+c1, c2, c3 = st.columns(3)
+with c1: perf_file = st.file_uploader("1. Upload Actuals CSV", type=['csv'])
+with c2: target_file = st.file_uploader("2. Upload Targets CSV", type=['csv'])
+with c3: staff_file = st.file_uploader("3. Upload Staff CSV", type=['csv'])
 
-if perf_file:
+if perf_file and target_file:
     try:
         df = process_performance_data(perf_file)
+        target_df = load_targets_data(target_file)
+        
+        with st.expander("🔍 Preview Uploaded Data"):
+            p1, p2 = st.columns(2)
+            p1.write("**Actuals Preview:**"); p1.dataframe(df.head(3))
+            p2.write("**Targets Preview:**"); p2.dataframe(target_df.head(3))
         
         # --- 🛡️ Null Pair Validation ---
         if 'Pair_ID' in df.columns:
-            if df['Pair_ID'].isnull().any():
-                st.error("🚨 Null Pair detected. Please Align Pairing correctly")
+            if df['Pair_ID'].isnull().any() or (df['Pair_ID'] == '').any():
+                st.error("🚨 Null/Blank Pair detected in Actuals. Please Align Pairing correctly")
                 st.stop()
         
         group_key = LEVEL_CONFIG[eval_level]["group_key"]
         unit_col = LEVEL_CONFIG[eval_level]["unit_name"]
+        match_key = LEVEL_CONFIG[eval_level]["match_key"]
         
-        if group_key:
+        # --- Aggregation ---
+        agg_dict = {c: 'sum' for c in ['New_Customers', 'Unique_Customers', 'Active_Customers', 'Dormant_Customers', 'Amount_Collected', 'Disb_Actual'] if c in df.columns}
+        agg_dict.update({c: 'mean' for c in ['DD_Plus_7_Pct', 'OTC_Pct', 'Overall_Collection_Pct'] if c in df.columns})
+
+        if eval_level == "Pairs (LO & CO)":
+            if 'Branch' not in df.columns or 'Pair_ID' not in df.columns:
+                st.error("🚨 'Branch' and 'Pair_ID' columns are required in Actuals for Pairs evaluation.")
+                st.stop()
+                
+            eval_df = df.groupby(['Branch', 'Pair_ID']).agg(agg_dict).reset_index()
+            eval_df['Multiplier'] = 1.0
+            
+            merge_keys = ['Branch', 'Pair_ID'] if 'Branch' in target_df.columns else ['Pair_ID']
+            
+        else:
             unit_counts = df.groupby(group_key)[unit_col].nunique().reset_index(name='Unit_Count')
-            agg_dict = {c: 'sum' for c in ['New_Customers', 'Unique_Customers', 'Active_Customers', 'Dormant_Customers', 'Amount_Collected', 'Disb_Target', 'Disb_Actual'] if c in df.columns}
-            agg_dict.update({c: 'mean' for c in ['DD_Plus_7_Pct', 'OTC_Pct', 'Overall_Collection_Pct'] if c in df.columns})
             eval_df = df.groupby(group_key).agg(agg_dict).reset_index().merge(unit_counts, on=group_key)
             eval_df['Multiplier'] = eval_df['Unit_Count'].astype(float) if eval_level == "Branch Managers" else np.where(eval_df['Unit_Count'] > scale_threshold, eval_df['Unit_Count'] / scale_threshold, 1.0)
-        else:
-            eval_df = df.copy()
-            eval_df['Multiplier'] = 1.0
+            merge_keys = [match_key]
+
+        target_df_clean = target_df.drop_duplicates(subset=merge_keys)
+        
+        # Merge targets into the evaluation dataframe
+        eval_df = eval_df.merge(target_df_clean, on=merge_keys, how='left').fillna(0)
+
+        # --- Enhanced Missing Target Warning ---
+        if 'Disb_Target' in eval_df.columns and campaign_name == "Disbursements":
+            missing_targets = eval_df[eval_df['Disb_Target'] == 0]
+            if not missing_targets.empty:
+                # Dynamically construct the entity names based on available merge keys
+                if len(merge_keys) == 2:
+                    missing_entities = missing_targets[merge_keys[0]].astype(str) + " (" + missing_targets[merge_keys[1]].astype(str) + ")"
+                else:
+                    missing_entities = missing_targets[merge_keys[0]].astype(str)
+                
+                missing_str = ", ".join(missing_entities.tolist())
+                st.warning(f"⚠️ **Missing targets for {len(missing_targets)} entities:**\n\n{missing_str}\n\n*These entities will be evaluated against a target of 0. Check your Target CSV to ensure they exist.*")
 
         # --- Calculation Engine ---
         q = eval_df.copy()
@@ -142,51 +223,79 @@ if perf_file:
         for filter_key in active_filters:
             if filter_key in ["OTC_Pct", "DD_Plus_7_Pct", "Overall_Collection_Pct"]:
                 q = q[q[filter_key] >= targets[filter_key]]
+            
             elif filter_key == "disb_threshold":
-                # Calculate achievement on the fly
+                if 'Disb_Target' not in q.columns:
+                    st.error("🚨 Missing 'Disb_Target' column in Targets CSV.")
+                    st.stop()
+                
+                # Formula protects against dividing by zero
                 q['Disb_Achievement_Pct'] = np.where(q['Disb_Target'] > 0, (q['Disb_Actual'] / q['Disb_Target'] * 100), 0)
                 q = q[q['Disb_Achievement_Pct'] >= targets[filter_key]]
+            
             else:
-                q = q[q[filter_key] >= (targets[filter_key] * m)]
+                target_col = f"Target_{filter_key}"
+                if target_col in q.columns:
+                    q['Target_Goal'] = q[target_col] * m 
+                else:
+                    q['Target_Goal'] = targets[filter_key] * m 
+                
+                q = q[q[filter_key] >= q['Target_Goal']]
 
         if "Customers" in campaign_name:
             col = campaign_name.replace(" ", "_")
-            q['Extra_Achieved'] = (q[col] - (targets[col] * m)).clip(lower=0)
+            q['Extra_Achieved'] = (q[col] - q['Target_Goal']).clip(lower=0)
             q['Extra_Bonus_Value'] = np.floor(q['Extra_Achieved'] / bonus_step_count) * bonus_step_amount
+        
         elif campaign_name == "Disbursements":
-            # Ensure Pct exists if filter wasn't run
-            if 'Disb_Achievement_Pct' not in q.columns:
-                q['Disb_Achievement_Pct'] = np.where(q['Disb_Target'] > 0, (q['Disb_Actual'] / q['Disb_Target'] * 100), 0)
             q['Pct_Above_Threshold'] = (q['Disb_Achievement_Pct'] - targets["disb_threshold"]).clip(lower=0)
             q['Extra_Bonus_Value'] = np.floor(q['Pct_Above_Threshold'] / bonus_step_count) * bonus_step_amount
+        
         else:
             q['Extra_Bonus_Value'] = 0.0
 
         q['Base_Bonus'] = base_bonus
         q['Staff_Payout_Amount'] = q['Base_Bonus'] + q['Extra_Bonus_Value']
 
-        # Staff Mapping
+        # --- Staff Mapping ---
         if eval_level == "Pairs (LO & CO)":
             q['Role'] = [['Loan Officer', 'Collections Officer'] for _ in range(len(q))]
             staff_df = q.explode('Role')
             m_keys = ['Branch', 'Pair_ID', 'Role']
         else:
-            staff_df = q.assign(Role=eval_level.rstrip('s'))
-            m_keys = [group_key, 'Role']
+            # Assures the Role injected here matches the Title case cleaned by standard_merge_keys
+            staff_df = q.assign(Role=eval_level.rstrip('s').title())
+            g_key = group_key if isinstance(group_key, str) else group_key[0] 
+            m_keys = [g_key, 'Role']
 
         if staff_file:
-            s_dir = pd.read_csv(staff_file, dtype={'Phone_Number': str, 'Pair_ID': str})
+            s_dir = load_staff_directory(staff_file)
             staff_df = staff_df.merge(s_dir.drop_duplicates(m_keys), on=m_keys, how='left')
             if 'Staff_Name' in staff_df.columns:
                 staff_df['Staff_Name'] = staff_df['Staff_Name'].fillna('Unknown Staff')
+
+        # Formatting Output Columns
+        if campaign_name == "Disbursements" and not staff_df.empty:
+            cols = list(staff_df.columns)
+            if 'Disb_Actual' in cols and 'Disb_Achievement_Pct' in cols:
+                cols.remove('Disb_Achievement_Pct')
+                idx = cols.index('Disb_Actual') + 1
+                
+                if 'Disb_Target' in cols:
+                    cols.remove('Disb_Target')
+                    cols.insert(idx, 'Disb_Target')
+                    idx += 1
+                
+                cols.insert(idx, 'Disb_Achievement_Pct')
+                staff_df = staff_df[cols]
 
         # --- Final Display ---
         if not staff_df.empty:
             st.divider()
             m1, m2, m3 = st.columns(3)
-            m1.metric("Total Payout", f"KES{staff_df['Staff_Payout_Amount'].sum():,.2f}")
+            m1.metric("Total Payout", f"KES {staff_df['Staff_Payout_Amount'].sum():,.2f}")
             m2.metric("Qualifying Staff", len(staff_df))
-            m3.metric("Avg. Bonus", f"KES{staff_df['Staff_Payout_Amount'].mean():,.2f}")
+            m3.metric("Avg. Bonus", f"KES {staff_df['Staff_Payout_Amount'].mean():,.2f}")
             
             st.dataframe(
                 staff_df, 
