@@ -25,14 +25,12 @@ st.markdown("""
 # --- 🛡️ NEW: ROBUST STRING CLEANER ---
 def standardize_merge_keys(df):
     """Aggressively cleans merge keys to prevent disqualification due to typos, spaces, or case mismatches."""
-    # Clean Locations & Roles (Title Case)
     for col in ['Branch', 'Subsector', 'Sector', 'Role']:
         if col in df.columns:
             df[col] = df[col].astype(str).str.strip().str.title()
-            df[col] = df[col].str.replace(r'\s+', ' ', regex=True) # Remove double spaces
+            df[col] = df[col].str.replace(r'\s+', ' ', regex=True) 
             df[col] = df[col].replace({'Nan': np.nan, 'None': np.nan})
             
-    # Clean Pair IDs (Upper Case + Fix Float strings like "1.0" -> "1")
     if 'Pair_ID' in df.columns:
         df['Pair_ID'] = df['Pair_ID'].astype(str).str.strip().str.upper()
         df['Pair_ID'] = df['Pair_ID'].str.replace(r'\s+', ' ', regex=True)
@@ -178,7 +176,7 @@ if perf_file and target_file:
         unit_col = LEVEL_CONFIG[eval_level]["unit_name"]
         match_key = LEVEL_CONFIG[eval_level]["match_key"]
         
-        # --- Aggregation ---
+        # --- 📈 1. AGGREGATE ACTUALS ---
         agg_dict = {c: 'sum' for c in ['New_Customers', 'Unique_Customers', 'Active_Customers', 'Dormant_Customers', 'Amount_Collected', 'Disb_Actual'] if c in df.columns}
         agg_dict.update({c: 'mean' for c in ['DD_Plus_7_Pct', 'OTC_Pct', 'Overall_Collection_Pct'] if c in df.columns})
 
@@ -189,7 +187,6 @@ if perf_file and target_file:
                 
             eval_df = df.groupby(['Branch', 'Pair_ID']).agg(agg_dict).reset_index()
             eval_df['Multiplier'] = 1.0
-            
             merge_keys = ['Branch', 'Pair_ID'] if 'Branch' in target_df.columns else ['Pair_ID']
             
         else:
@@ -198,16 +195,38 @@ if perf_file and target_file:
             eval_df['Multiplier'] = eval_df['Unit_Count'].astype(float) if eval_level == "Branch Managers" else np.where(eval_df['Unit_Count'] > scale_threshold, eval_df['Unit_Count'] / scale_threshold, 1.0)
             merge_keys = [match_key]
 
-        target_df_clean = target_df.drop_duplicates(subset=merge_keys)
+        for mk in merge_keys:
+            if mk in eval_df.columns: eval_df[mk] = eval_df[mk].astype(str)
+            if mk in target_df.columns: target_df[mk] = target_df[mk].astype(str)
         
-        # Merge targets into the evaluation dataframe
+        # --- 🎯 2. AGGREGATE TARGETS ---
+        # Ensures targets (like Disb_Target) are properly rolled up from Pairs -> Branch -> Subsector -> Sector
+        missing_t_keys = [k for k in merge_keys if k not in target_df.columns]
+        if missing_t_keys:
+            st.error(f"🚨 Missing required column in Targets CSV: {missing_t_keys}. The Targets CSV must contain the column you are evaluating against.")
+            st.stop()
+            
+        target_num_cols = target_df.select_dtypes(include=[np.number]).columns.tolist()
+        # Sum absolute targets (e.g. Disbursements, New Customers), Average percentage targets (e.g. OTC_Pct)
+        t_sum_cols = [c for c in target_num_cols if 'Pct' not in c and c not in merge_keys]
+        t_mean_cols = [c for c in target_num_cols if 'Pct' in c and c not in merge_keys]
+
+        target_agg_dict = {}
+        for c in t_sum_cols: target_agg_dict[c] = 'sum'
+        for c in t_mean_cols: target_agg_dict[c] = 'mean'
+
+        if target_agg_dict:
+            target_df_clean = target_df.groupby(merge_keys).agg(target_agg_dict).reset_index()
+        else:
+            target_df_clean = target_df.drop_duplicates(subset=merge_keys)
+
+        # Merge rolled-up targets into the rolled-up actuals
         eval_df = eval_df.merge(target_df_clean, on=merge_keys, how='left').fillna(0)
 
         # --- Enhanced Missing Target Warning ---
         if 'Disb_Target' in eval_df.columns and campaign_name == "Disbursements":
             missing_targets = eval_df[eval_df['Disb_Target'] == 0]
             if not missing_targets.empty:
-                # Dynamically construct the entity names based on available merge keys
                 if len(merge_keys) == 2:
                     missing_entities = missing_targets[merge_keys[0]].astype(str) + " (" + missing_targets[merge_keys[1]].astype(str) + ")"
                 else:
@@ -229,7 +248,6 @@ if perf_file and target_file:
                     st.error("🚨 Missing 'Disb_Target' column in Targets CSV.")
                     st.stop()
                 
-                # Formula protects against dividing by zero
                 q['Disb_Achievement_Pct'] = np.where(q['Disb_Target'] > 0, (q['Disb_Actual'] / q['Disb_Target'] * 100), 0)
                 q = q[q['Disb_Achievement_Pct'] >= targets[filter_key]]
             
@@ -263,7 +281,6 @@ if perf_file and target_file:
             staff_df = q.explode('Role')
             m_keys = ['Branch', 'Pair_ID', 'Role']
         else:
-            # Assures the Role injected here matches the Title case cleaned by standard_merge_keys
             staff_df = q.assign(Role=eval_level.rstrip('s').title())
             g_key = group_key if isinstance(group_key, str) else group_key[0] 
             m_keys = [g_key, 'Role']
