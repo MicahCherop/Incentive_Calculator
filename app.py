@@ -203,7 +203,7 @@ with tab_db:
         
         clean_db_df = standardize_merge_keys(raw_db_df)
         
-       try:
+    try:
             engine = get_db_engine()
             
             # --- 🛠️ MODIFIED SECTION ---
@@ -235,7 +235,7 @@ with tab_db:
             st.success("✅ MySQL Database successfully updated with Primary Key!")
             # ---------------------------
 
-        except Exception as e:
+    except Exception as e:
             st.error(f"Failed to update MySQL: {e}")
 
     st.divider()
