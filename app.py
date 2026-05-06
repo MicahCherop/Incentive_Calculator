@@ -123,7 +123,7 @@ def load_staff_directory(file):
 # --- 🏢 MAIN INTERFACE ---
 st.title("UPIA Incentive System 🏢")
 
-tab_calc, tab_db = st.tabs(["📊 Calculator Engine", "🗄️ Monthly Target Database"])
+tab_calc, tab_db = st.tabs(["📊 Calculator Engine", "🗄️ Daily Target Database"])
 
 LEVEL_CONFIG = {
     "Pairs (LO & CO)": {"group_key": ["Branch", "Pair_ID"], "unit_name": "Pair_ID", "match_key": "Pair_ID"},
@@ -181,10 +181,6 @@ elif campaign_name == "Disbursements":
     targets["disb_threshold"] = st.sidebar.number_input("Qualification Threshold (%)", value=100.0)
     active_filters.append("disb_threshold")
 
-
-# ==========================================
-# TAB 2: DATABASE MANAGEMENT (MySQL)
-# ==========================================
 # ==========================================
 # TAB 2: DATABASE MANAGEMENT (MySQL)
 # ==========================================
@@ -204,31 +200,38 @@ with tab_db:
             if col not in ['Pair_ID', 'Branch', 'Subsector', 'Sector']:
                 raw_db_df[col] = pd.to_numeric(raw_db_df[col].astype(str).replace(r'[^-0-9.]', '', regex=True), errors='coerce').fillna(0)
         
-        # This is where clean_db_df is defined!
         clean_db_df = standardize_merge_keys(raw_db_df)
+        
+        # ⚠️ CRITICAL: Remove duplicates before uploading
+        # A Primary Key cannot have duplicate values.
+        clean_db_df = clean_db_df.drop_duplicates(subset=['Pair_ID'])
         
         try:
             engine = get_db_engine()
             
-            # 1. Define schema requirements for Aiven (Primary Key support)
+            # We set Pair_ID as the index so to_sql can turn it into a Primary Key
+            upload_df = clean_db_df.set_index('Pair_ID')
+            
             from sqlalchemy import String
+            # We explicitly define the type for the index (Pair_ID)
             dtype_map = {'Pair_ID': String(100)}
 
-            # 2. Write the table
-            clean_db_df.to_sql(
+            # Write the table
+            # index=True tells SQLAlchemy to create the Pair_ID column as a key
+            upload_df.to_sql(
                 'monthly_targets', 
                 engine, 
                 if_exists='replace', 
-                index=False,
+                index=True, 
                 dtype=dtype_map
             )
             
-            # 3. Manually set the Primary Key to satisfy Aiven's security policy
+            # Final touch: Explicitly tell MySQL it's a Primary Key to satisfy Aiven
             with engine.connect() as conn:
                 conn.execute(text("ALTER TABLE monthly_targets ADD PRIMARY KEY (Pair_ID);"))
                 conn.commit()
                 
-            st.success("✅ MySQL Database successfully updated with Primary Key!")
+            st.success("✅ MySQL Database successfully updated!")
             
         except Exception as e:
             st.error(f"Failed to update MySQL: {e}")
