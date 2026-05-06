@@ -30,12 +30,27 @@ st.markdown("""
 def get_db_engine():
     """Creates an SQLAlchemy engine using Streamlit Secrets with URL encoding."""
     try:
+        # Check if secrets exist
+        if "mysql" not in st.secrets:
+            st.error("🚨 Missing [mysql] section in Streamlit Secrets! Please configure your secrets.")
+            st.stop()
+
         db_user = st.secrets["mysql"]["user"]
         raw_pass = st.secrets["mysql"]["password"]
         db_host = st.secrets["mysql"]["host"]
         db_port = st.secrets["mysql"]["port"]
         db_name = st.secrets["mysql"]["database"]
         
+        # ⚠️ NEW: Prevent the app from crashing if 127.0.0.1 is used on the cloud
+        if db_host in ["127.0.0.1", "localhost"]:
+            st.error(
+                "🚨 **Database Connection Blocked:** \n"
+                "Your Secrets are currently trying to connect to `127.0.0.1` (localhost). "
+                "Because this app is hosted on Streamlit Cloud, it cannot see your local computer's database. \n\n"
+                "**Fix:** Please update your Streamlit Cloud Secrets with the **Public IP** or **External Hostname** of your database."
+            )
+            st.stop()
+            
         # Safely encode the password to handle special characters like '@'
         safe_pass = urllib.parse.quote_plus(raw_pass)
         
