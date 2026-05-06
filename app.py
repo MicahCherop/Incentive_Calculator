@@ -184,8 +184,11 @@ elif campaign_name == "Disbursements":
 # ==========================================
 # TAB 2: DATABASE MANAGEMENT (MySQL)
 # ==========================================
+# ==========================================
+# TAB 2: DATABASE MANAGEMENT (MySQL)
+# ==========================================
 with tab_db:
-    st.header("🗄️ Manage Daily Targets")
+    st.header("🗄️ Manage Monthly Targets")
     st.write("Upload a new Target CSV to overwrite the current **MySQL** database.")
     
     new_db_file = st.file_uploader("Upload New Master Targets CSV", type=['csv'])
@@ -201,23 +204,26 @@ with tab_db:
                 raw_db_df[col] = pd.to_numeric(raw_db_df[col].astype(str).replace(r'[^-0-9.]', '', regex=True), errors='coerce').fillna(0)
         
         clean_db_df = standardize_merge_keys(raw_db_df)
+
+        # 🛠️ CREATE A UNIQUE INDEX COLUMN
+        # This combines Branch and Pair_ID so 'Nairobi_Pair 1' is different from 'Mombasa_Pair 1'
+        clean_db_df['Unique_ID'] = clean_db_df['Branch'].astype(str) + "_" + clean_db_df['Pair_ID'].astype(str)
         
-        # ⚠️ CRITICAL: Remove duplicates before uploading
-        # A Primary Key cannot have duplicate values.
-        clean_db_df = clean_db_df.drop_duplicates(subset=['Pair_ID'])
+        # Now drop duplicates based on the new Unique_ID
+        clean_db_df = clean_db_df.drop_duplicates(subset=['Unique_ID'])
         
+        st.write(f"✅ Processing {len(clean_db_df)} unique Branch-Pair records.")
+
         try:
             engine = get_db_engine()
             
-            # We set Pair_ID as the index so to_sql can turn it into a Primary Key
-            upload_df = clean_db_df.set_index('Pair_ID')
+            # Set our new Unique_ID as the index for the database
+            upload_df = clean_db_df.set_index('Unique_ID')
             
             from sqlalchemy import String
-            # We explicitly define the type for the index (Pair_ID)
-            dtype_map = {'Pair_ID': String(100)}
+            dtype_map = {'Unique_ID': String(200)}
 
-            # Write the table
-            # index=True tells SQLAlchemy to create the Pair_ID column as a key
+            # Write to SQL
             upload_df.to_sql(
                 'monthly_targets', 
                 engine, 
@@ -226,17 +232,18 @@ with tab_db:
                 dtype=dtype_map
             )
             
-            # Final touch: Explicitly tell MySQL it's a Primary Key to satisfy Aiven
+            # Explicitly set the Primary Key for Aiven
             with engine.connect() as conn:
-                conn.execute(text("ALTER TABLE monthly_targets ADD PRIMARY KEY (Pair_ID);"))
+                conn.execute(text("ALTER TABLE monthly_targets ADD PRIMARY KEY (Unique_ID);"))
                 conn.commit()
                 
-            st.success("✅ MySQL Database successfully updated!")
+            st.success("✅ MySQL Database updated! All pairs across all branches are now saved.")
             
         except Exception as e:
             st.error(f"Failed to update MySQL: {e}")
 
     st.divider()
+    
     st.subheader("Current Database View")
     current_db = load_targets_from_db()
     if not current_db.empty:
