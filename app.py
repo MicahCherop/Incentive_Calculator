@@ -203,10 +203,38 @@ with tab_db:
         
         clean_db_df = standardize_merge_keys(raw_db_df)
         
-        try:
+       try:
             engine = get_db_engine()
-            clean_db_df.to_sql('monthly_targets', engine, if_exists='replace', index=False)
-            st.success("✅ MySQL Database successfully updated!")
+            
+            # --- 🛠️ MODIFIED SECTION ---
+            # We use dtype to tell the database that Pair_ID is the Primary Key
+            from sqlalchemy import String, Integer, Float
+
+            # Define the schema mapping
+            # This ensures Pair_ID is the Primary Key and has a fixed length
+            dtype_map = {
+                'Pair_ID': String(50)
+            }
+
+            # Write to SQL. 
+            # Note: index=True and index_label='Pair_ID' makes it the primary key 
+            # if we don't have a direct PK flag in to_sql
+            clean_db_df.to_sql(
+                'monthly_targets', 
+                engine, 
+                if_exists='replace', 
+                index=False,
+                dtype=dtype_map
+            )
+            
+            # Now, we manually set the Primary Key after the table is created
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE monthly_targets ADD PRIMARY KEY (Pair_ID);"))
+                conn.commit()
+            
+            st.success("✅ MySQL Database successfully updated with Primary Key!")
+            # ---------------------------
+
         except Exception as e:
             st.error(f"Failed to update MySQL: {e}")
 
