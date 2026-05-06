@@ -185,8 +185,11 @@ elif campaign_name == "Disbursements":
 # ==========================================
 # TAB 2: DATABASE MANAGEMENT (MySQL)
 # ==========================================
+# ==========================================
+# TAB 2: DATABASE MANAGEMENT (MySQL)
+# ==========================================
 with tab_db:
-    st.header("🗄️ Manage Monthly Targets")
+    st.header("🗄️ Manage Daily Targets")
     st.write("Upload a new Target CSV to overwrite the current **MySQL** database.")
     
     new_db_file = st.file_uploader("Upload New Master Targets CSV", type=['csv'])
@@ -201,24 +204,17 @@ with tab_db:
             if col not in ['Pair_ID', 'Branch', 'Subsector', 'Sector']:
                 raw_db_df[col] = pd.to_numeric(raw_db_df[col].astype(str).replace(r'[^-0-9.]', '', regex=True), errors='coerce').fillna(0)
         
+        # This is where clean_db_df is defined!
         clean_db_df = standardize_merge_keys(raw_db_df)
         
-    try:
+        try:
             engine = get_db_engine()
             
-            # --- 🛠️ MODIFIED SECTION ---
-            # We use dtype to tell the database that Pair_ID is the Primary Key
-            from sqlalchemy import String, Integer, Float
+            # 1. Define schema requirements for Aiven (Primary Key support)
+            from sqlalchemy import String
+            dtype_map = {'Pair_ID': String(100)}
 
-            # Define the schema mapping
-            # This ensures Pair_ID is the Primary Key and has a fixed length
-            dtype_map = {
-                'Pair_ID': String(50)
-            }
-
-            # Write to SQL. 
-            # Note: index=True and index_label='Pair_ID' makes it the primary key 
-            # if we don't have a direct PK flag in to_sql
+            # 2. Write the table
             clean_db_df.to_sql(
                 'monthly_targets', 
                 engine, 
@@ -227,15 +223,14 @@ with tab_db:
                 dtype=dtype_map
             )
             
-            # Now, we manually set the Primary Key after the table is created
+            # 3. Manually set the Primary Key to satisfy Aiven's security policy
             with engine.connect() as conn:
                 conn.execute(text("ALTER TABLE monthly_targets ADD PRIMARY KEY (Pair_ID);"))
                 conn.commit()
-            
+                
             st.success("✅ MySQL Database successfully updated with Primary Key!")
-            # ---------------------------
-
-    except Exception as e:
+            
+        except Exception as e:
             st.error(f"Failed to update MySQL: {e}")
 
     st.divider()
@@ -245,7 +240,6 @@ with tab_db:
         st.dataframe(current_db, use_container_width=True)
     else:
         st.warning("Database is empty. Please upload targets.")
-
 
 # ==========================================
 # TAB 1: CALCULATOR ENGINE
